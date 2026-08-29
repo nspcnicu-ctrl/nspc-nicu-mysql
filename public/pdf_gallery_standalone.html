@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pusat Panduan & Modul Perawatan Buah Hati - Galeri & Upload PDF</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- PDF.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen p-4 sm:p-8">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- HEADER TITLE -->
+    <div class="bg-teal-900 text-white p-6 sm:p-8 rounded-3xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 bg-amber-400 text-teal-950 font-black text-xs rounded-full uppercase tracking-wider mb-2">
+          <span>Galeri &amp; Portal Edukasi</span>
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-black text-white">
+          Pusat Panduan &amp; Modul Perawatan Buah Hati
+        </h1>
+        <p class="text-teal-100 text-xs sm:text-sm mt-1 max-w-2xl font-medium">
+          Kelola, pratinjau otomatis halaman pertama PDF, dan unduh modul medis perawatan bayi risiko tinggi &amp; prematur.
+        </p>
+      </div>
+
+      <button id="toggleUploadBtn" class="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-teal-950 font-extrabold text-xs rounded-2xl shadow-lg transition-all flex items-center gap-2 cursor-pointer self-start md:self-auto">
+        <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+        <span>Form Unggah PDF</span>
+      </button>
+    </div>
+
+    <!-- FORM INPUT / UPLOAD PDF -->
+    <div id="uploadFormSection" class="bg-white p-6 rounded-3xl border border-slate-200 shadow-md space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center gap-2 text-teal-900 font-black text-sm sm:text-base">
+          <i data-lucide="file-plus" class="w-5 h-5 text-emerald-600"></i>
+          <span>Unggah Modul PDF Baru (Otomatis Render Preview Halaman 1)</span>
+        </div>
+      </div>
+
+      <form id="pdfUploadForm" class="space-y-4 text-xs">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-bold text-slate-800 mb-1">Judul Modul Edukasi <span class="text-rose-500">*</span></label>
+            <input type="text" id="pdfTitle" required placeholder="Contoh: Panduan PMK & Perawatan NICU" className="" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-600 outline-none">
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-800 mb-1">Kategori Edukasi <span class="text-rose-500">*</span></label>
+            <select id="pdfCategory" class="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-teal-600 outline-none cursor-pointer">
+              <option value="Bayi BBLR & Prematur">Bayi BBLR &amp; Prematur</option>
+              <option value="Perawatan Rutin & Skrining Bayi">Perawatan Rutin &amp; Skrining Bayi</option>
+              <option value="Perawatan Medis Khusus & Pasca-Operasi">Perawatan Medis Khusus &amp; Pasca-Operasi</option>
+              <option value="Higienitas & Manajemen ASI">Higienitas &amp; Manajemen ASI</option>
+              <option value="Kegawatdaruratan & Dukungan Duka">Kegawatdaruratan &amp; Dukungan Duka</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-800 mb-1">Pilih File PDF <span class="text-rose-500">*</span></label>
+          <div class="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <label class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-sm shrink-0 flex items-center gap-2">
+              <i data-lucide="file-up" class="w-4 h-4"></i>
+              <span>Pilih File PDF</span>
+              <input type="file" id="pdfFileInput" accept=".pdf" class="hidden">
+            </label>
+            <span id="fileNameDisplay" class="text-xs font-medium text-slate-500 italic truncate flex-1">Belum ada file dipilih (.pdf)</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-800 mb-1">Catatan Khusus Nakes untuk Orang Tua</label>
+          <textarea id="pdfNote" rows="2" placeholder="Contoh: Baca panduan ini sebelum sesi dekapan kontak kulit-ke-kulit..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-teal-600 outline-none"></textarea>
+        </div>
+
+        <!-- Render Preview Box -->
+        <div id="renderPreviewBox" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+          <div class="text-xs font-bold text-emerald-800 flex items-center gap-2">
+            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+            <span>Preview Halaman Pertama Berhasil Di-render:</span>
+          </div>
+          <div class="w-32 aspect-[3/4] bg-white rounded-lg border border-slate-300 overflow-hidden shadow-md">
+            <img id="renderedPreviewImg" class="w-full h-full object-cover" src="" alt="PDF Preview">
+          </div>
+        </div>
+
+        <button type="submit" class="px-6 py-3 bg-teal-900 hover:bg-teal-950 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer">
+          <i data-lucide="plus-circle" class="w-4 h-4 text-amber-300"></i>
+          <span>Simpan &amp; Terbitkan Ke Galeri</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- KATEGORI & FILTER (PILL BUTTONS ATAS LAYOUT) -->
+    <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none" id="categoryFiltersContainer">
+        <!-- JS rendered pills -->
+      </div>
+
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+        <div class="relative w-full sm:w-80">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+          <input type="text" id="searchInput" placeholder="Cari modul..." class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-teal-600 outline-none">
+        </div>
+
+        <div class="text-xs font-bold text-slate-500">
+          Total Modul: <span id="totalModulCount" class="text-teal-900 font-black">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAMPILAN LAYOUT GALERI GRID (4-5 KOLOM DESKTOP, 2 TABLET, 1 MOBILE) -->
+    <div id="galleryGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+      <!-- JS rendered cards -->
+    </div>
+
+  </div>
+
+  <!-- LIGHTBOX PREVIEW MODAL -->
+  <div id="previewModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="p-4 bg-teal-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="eye" class="w-5 h-5 text-amber-300"></i>
+          <h3 id="modalPdfTitle" class="font-extrabold text-sm sm:text-base truncate">Pratinjau Modul</h3>
+        </div>
+        <button id="closeModalBtn" class="p-1 hover:bg-teal-800 rounded-full cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-100">
+        <img id="modalPreviewImg" class="max-h-[60vh] object-contain rounded-xl shadow-lg border border-slate-200 bg-white" src="" alt="Full Preview">
+        <p id="modalPdfNote" class="mt-4 text-xs italic text-slate-700 bg-emerald-50 p-3 rounded-xl border border-emerald-200 max-w-lg text-center"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- VANILLA JAVASCRIPT LOGIC -->
+  <script>
+    // Initial State & Data
+    let modulesList = [
+      {
+        id: '1',
+        title: 'Panduan Metode Kanguru (PMK) Bayi Prematur',
+        category: 'Bayi BBLR & Prematur',
+        pageCount: 12,
+        fileSizeText: '2.4 MB',
+        publishedAt: '12 Agt 2026',
+        coverUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%23064e3b"/><text x="50%" y="40%" fill="%23fef08a" font-size="20" font-weight="bold" text-anchor="middle">Metode Kanguru</text><text x="50%" y="55%" fill="%23ffffff" font-size="14" text-anchor="middle">Bayi BBLR & Prematur</text></svg>',
+        nakesNote: 'Lakukan dekapan kontak kulit ke kulit minimal 1 jam tiap sesi.'
+      },
+      {
+        id: '2',
+        title: 'Panduan Pumping & Manajemen ASI Perah NICU',
+        category: 'Higienitas & Manajemen ASI',
+        pageCount: 8,
+        fileSizeText: '1.8 MB',
+        publishedAt: '10 Agt 2026',
+        coverUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%230f766e"/><text x="50%" y="40%" fill="%23ffffff" font-size="20" font-weight="bold" text-anchor="middle">Manajemen ASI</text><text x="50%" y="55%" fill="%23ccfbf1" font-size="14" text-anchor="middle">NICU & Rumah</text></svg>',
+        nakesNote: 'Pastikan pompa ASI disterilkan dengan air hangat sebelum dipakai.'
+      },
+      {
+        id: '3',
+        title: 'Skrining Pendengaran & Penglihatan Bayi',
+        category: 'Perawatan Rutin & Skrining Bayi',
+        pageCount: 6,
+        fileSizeText: '1.1 MB',
+        publishedAt: '08 Agt 2026',
+        coverUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%23047857"/><text x="50%" y="40%" fill="%23fef08a" font-size="20" font-weight="bold" text-anchor="middle">Skrining Bayi</text><text x="50%" y="55%" fill="%23ffffff" font-size="14" text-anchor="middle">OAE & ROP</text></svg>',
+        nakesNote: 'Jadwal skrining ROP pada usia gestasi 32 minggu.'
+      },
+      {
+        id: '4',
+        title: 'Pertolongan Pertama Tanda Bahaya Bayi',
+        category: 'Kegawatdaruratan & Dukungan Duka',
+        pageCount: 15,
+        fileSizeText: '3.2 MB',
+        publishedAt: '05 Agt 2026',
+        coverUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%23991b1b"/><text x="50%" y="40%" fill="%23ffffff" font-size="20" font-weight="bold" text-anchor="middle">Kegawatdaruratan</text><text x="50%" y="55%" fill="%23fecaca" font-size="14" text-anchor="middle">Panduan Cepat</text></svg>',
+        nakesNote: 'Segera bawa ke IGD jika bibir bayi kebiruan atau merintih.'
+      }
+    ];
+
+    const categories = [
+      'Semua Kategori',
+      'Bayi BBLR & Prematur',
+      'Perawatan Rutin & Skrining Bayi',
+      'Perawatan Medis Khusus & Pasca-Operasi',
+      'Higienitas & Manajemen ASI',
+      'Kegawatdaruratan & Dukungan Duka'
+    ];
+
+    let currentCategory = 'Semua Kategori';
+    let currentSearch = '';
+    let newlyRenderedCover = '';
+    let newlyRenderedPages = 1;
+
+    // DOM Elements
+    const categoryFiltersContainer = document.getElementById('categoryFiltersContainer');
+    const galleryGrid = document.getElementById('galleryGrid');
+    const searchInput = document.getElementById('searchInput');
+    const totalModulCount = document.getElementById('totalModulCount');
+    const pdfFileInput = document.getElementById('pdfFileInput');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    const renderPreviewBox = document.getElementById('renderPreviewBox');
+    const renderedPreviewImg = document.getElementById('renderedPreviewImg');
+    const pdfUploadForm = document.getElementById('pdfUploadForm');
+    const previewModal = document.getElementById('previewModal');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    const modalPdfTitle = document.getElementById('modalPdfTitle');
+    const modalPreviewImg = document.getElementById('modalPreviewImg');
+    const modalPdfNote = document.getElementById('modalPdfNote');
+
+    // Initialize UI
+    document.addEventListener('DOMContentLoaded', () => {
+      renderCategoryPills();
+      renderGallery();
+      lucide.createIcons();
+    });
+
+    // Render Pill Buttons
+    function renderCategoryPills() {
+      categoryFiltersContainer.innerHTML = '';
+      categories.forEach(cat => {
+        const count = cat === 'Semua Kategori' 
+          ? modulesList.length 
+          : modulesList.filter(m => m.category === cat).length;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isActive = currentCategory === cat;
+
+        btn.className = `px-4 py-2 rounded-full text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 shadow-sm ${
+          isActive 
+            ? 'bg-teal-900 text-white shadow-md scale-105' 
+            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+        }`;
+
+        btn.innerHTML = `
+          <span>${cat}</span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] ${isActive ? 'bg-teal-800 text-amber-300' : 'bg-slate-200 text-slate-600'}">${count}</span>
+        `;
+
+        btn.addEventListener('click', () => {
+          currentCategory = cat;
+          renderCategoryPills();
+          renderGallery();
+        });
+
+        categoryFiltersContainer.appendChild(btn);
+      });
+    }
+
+    // Render Grid Gallery Cards
+    function renderGallery() {
+      galleryGrid.innerHTML = '';
+
+      const filtered = modulesList.filter(item => {
+        const matchCat = currentCategory === 'Semua Kategori' || item.category === currentCategory;
+        const matchSearch = currentSearch === '' || item.title.toLowerCase().includes(currentSearch.toLowerCase());
+        return matchCat && matchSearch;
+      });
+
+      totalModulCount.innerText = filtered.length;
+
+      if (filtered.length === 0) {
+        galleryGrid.innerHTML = `
+          <div class="col-span-full p-8 text-center text-slate-400 text-xs font-medium bg-white rounded-3xl border border-dashed border-slate-200">
+            Tidak ada modul PDF yang ditemukan untuk kategori ini.
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 overflow-hidden flex flex-col justify-between group relative';
+
+        card.innerHTML = `
+          <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden flex items-center justify-center">
+            <img src="${item.coverUrl}" alt="${item.title}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+            
+            <span class="absolute top-2.5 left-2.5 px-2.5 py-1 bg-emerald-600 backdrop-blur-xs text-white text-[10px] font-black uppercase tracking-wider rounded-lg shadow-md flex items-center gap-1 z-10">
+              <i data-lucide="sparkles" class="w-3 h-3 text-amber-300"></i>
+              <span>NEW</span>
+            </span>
+
+            <div class="absolute inset-0 bg-slate-900/65 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 z-20">
+              <button type="button" onclick="openPreviewModal('${item.id}')" class="w-11 h-11 bg-white hover:bg-teal-50 text-teal-800 rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer" title="Pratinjau Besar">
+                <i data-lucide="eye" class="w-5 h-5 text-teal-700"></i>
+              </button>
+
+              <button type="button" onclick="downloadPdf('${item.title}')" class="w-11 h-11 bg-teal-800 hover:bg-teal-900 text-white rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer" title="Unduh File PDF">
+                <i data-lucide="download" class="w-5 h-5 text-amber-300"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="p-4 space-y-2 flex-1 flex flex-col justify-between">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between gap-1">
+                <span class="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 truncate max-w-[140px]">${item.category}</span>
+                <span class="text-[10px] font-bold text-slate-400">${item.publishedAt}</span>
+              </div>
+
+              <h4 class="font-extrabold text-slate-900 text-sm line-clamp-2 leading-snug group-hover:text-teal-800 transition-colors">${item.title}</h4>
+
+              <div class="flex items-center justify-between text-[11px] text-slate-500 font-semibold pt-1">
+                <span>${item.pageCount} Halaman</span>
+                <span class="text-slate-400 font-bold">${item.fileSizeText}</span>
+              </div>
+
+              ${item.nakesNote ? `<div class="p-2 bg-emerald-50 border border-emerald-100 rounded-lg text-[11px] text-slate-700 italic font-medium line-clamp-2">"${item.nakesNote}"</div>` : ''}
+            </div>
+          </div>
+        `;
+
+        galleryGrid.appendChild(card);
+      });
+
+      lucide.createIcons();
+    }
+
+    // PDF.js Page 1 Convert to Canvas Image
+    pdfFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      fileNameDisplay.innerText = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        newlyRenderedPages = pdf.numPages;
+
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+        newlyRenderedCover = canvas.toDataURL('image/png');
+        renderedPreviewImg.src = newlyRenderedCover;
+        renderPreviewBox.classList.remove('hidden');
+      } catch (err) {
+        console.warn('PDF Rendering error, using SVG fallback:', err);
+        newlyRenderedCover = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%230f766e"/><text x="50%" y="40%" fill="%23ffffff" font-size="20" font-weight="bold" text-anchor="middle">Modul PDF</text></svg>';
+        renderedPreviewImg.src = newlyRenderedCover;
+        renderPreviewBox.classList.remove('hidden');
+      }
+    });
+
+    // Form Submit
+    pdfUploadForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const title = document.getElementById('pdfTitle').value;
+      const category = document.getElementById('pdfCategory').value;
+      const note = document.getElementById('pdfNote').value;
+
+      const newModule = {
+        id: Date.now().toString(),
+        title: title,
+        category: category,
+        pageCount: newlyRenderedPages || 1,
+        fileSizeText: '1.5 MB',
+        publishedAt: 'Hari Ini',
+        coverUrl: newlyRenderedCover || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="100%" height="100%" fill="%23064e3b"/><text x="50%" y="50%" fill="%23ffffff" font-size="18" text-anchor="middle">Dokumen Baru</text></svg>',
+        nakesNote: note
+      };
+
+      modulesList.unshift(newModule);
+      renderCategoryPills();
+      renderGallery();
+
+      // Reset
+      pdfUploadForm.reset();
+      fileNameDisplay.innerText = 'Belum ada file dipilih (.pdf)';
+      renderPreviewBox.classList.add('hidden');
+      alert('🎉 Modul PDF berhasil diunggah & langsung tayang di galeri!');
+    });
+
+    // Search Filter Input
+    searchInput.addEventListener('input', (e) => {
+      currentSearch = e.target.value;
+      renderGallery();
+    });
+
+    // Modal Lightbox Functions
+    window.openPreviewModal = function(id) {
+      const item = modulesList.find(m => m.id === id);
+      if (!item) return;
+
+      modalPdfTitle.innerText = item.title;
+      modalPreviewImg.src = item.coverUrl;
+      modalPdfNote.innerText = item.nakesNote ? `"${item.nakesNote}"` : 'Tidak ada catatan tambahan.';
+      previewModal.classList.remove('hidden');
+    };
+
+    closeModalBtn.addEventListener('click', () => {
+      previewModal.classList.add('hidden');
+    });
+
+    window.downloadPdf = function(title) {
+      alert(`Unduh file PDF "${title}" dimulai!`);
+    };
+
+    document.getElementById('toggleUploadBtn').addEventListener('click', () => {
+      document.getElementById('uploadFormSection').classList.toggle('hidden');
+    });
+  </script>
+</body>
+</html>

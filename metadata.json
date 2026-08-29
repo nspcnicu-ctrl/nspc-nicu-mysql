@@ -1,0 +1,8 @@
+{
+  "name": "Remix Test",
+  "description": "Imported from GitHub: nspcnicu-ctrl/Test",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
