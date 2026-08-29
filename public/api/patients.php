@@ -138,40 +138,86 @@ if ($method === 'POST') {
 
         // Soft Delete
         if ($action === 'delete' || $action === 'soft_delete') {
-            $pid = trim($input['id'] ?? '');
+            $pid = trim($input['id'] ?? $input['patient_id'] ?? '');
             if (empty($pid)) sendJsonResponse('error', 'ID wajib diisi untuk delete.', null, 400);
 
-            $stmt = $pdo->prepare("UPDATE patients SET is_deleted = 1, deleted_at = NOW(), updated_at = NOW() WHERE id = :id");
+            $stmt = $pdo->prepare("UPDATE `patients` SET `is_deleted` = 1, `deleted_at` = NOW(), `updated_at` = NOW() WHERE `id` = :id");
             $stmt->execute([':id' => $pid]);
-            sendJsonResponse('success', 'Pasien berhasil dihapus (soft delete).', ['id' => $pid]);
+            sendJsonResponse('success', 'Pasien berhasil dihapus (soft delete).', ['id' => $pid, 'is_deleted' => true]);
         }
 
         // Permanent Delete
         if ($action === 'permanent_delete' || $action === 'hard_delete') {
-            $pid = trim($input['id'] ?? '');
+            $pid = trim($input['id'] ?? $input['patient_id'] ?? '');
             if (empty($pid)) sendJsonResponse('error', 'ID wajib diisi untuk delete.', null, 400);
 
-            $pdo->prepare("DELETE FROM daily_logs WHERE patient_id = :id")->execute([':id' => $pid]);
-            $stmt = $pdo->prepare("DELETE FROM patients WHERE id = :id");
+            $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id")->execute([':id' => $pid]);
+            $stmt = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id");
             $stmt->execute([':id' => $pid]);
-            sendJsonResponse('success', 'Pasien berhasil dihapus permanen.', ['id' => $pid]);
+            sendJsonResponse('success', 'Pasien berhasil dihapus permanen.', ['id' => $pid, 'permanent' => true]);
         }
 
         // Restore
         if ($action === 'restore') {
-            $pid = trim($input['id'] ?? '');
+            $pid = trim($input['id'] ?? $input['patient_id'] ?? '');
             if (empty($pid)) sendJsonResponse('error', 'ID wajib diisi untuk restore.', null, 400);
 
-            $stmt = $pdo->prepare("UPDATE patients SET is_deleted = 0, deleted_at = NULL, updated_at = NOW() WHERE id = :id");
+            $stmt = $pdo->prepare("UPDATE `patients` SET `is_deleted` = 0, `deleted_at` = NULL, `updated_at` = NOW() WHERE `id` = :id");
             $stmt->execute([':id' => $pid]);
-            sendJsonResponse('success', 'Pasien berhasil dipulihkan.', ['id' => $pid]);
+            sendJsonResponse('success', 'Pasien berhasil dipulihkan.', ['id' => $pid, 'is_deleted' => false]);
         }
 
         // Empty Trash
         if ($action === 'empty_trash') {
-            $pdo->query("DELETE FROM daily_logs WHERE patient_id IN (SELECT id FROM patients WHERE is_deleted = 1)");
-            $pdo->query("DELETE FROM patients WHERE is_deleted = 1");
+            $pdo->query("DELETE FROM `daily_logs` WHERE `patient_id` IN (SELECT `id` FROM `patients` WHERE `is_deleted` = 1)");
+            $pdo->query("DELETE FROM `patients` WHERE `is_deleted` = 1");
             sendJsonResponse('success', 'Tempat sampah berhasil dikosongkan.');
+        }
+
+        // Update Status (e.g. Set Pulang / Rawat NICU / Siap Pulang)
+        if ($action === 'update_status' || $action === 'set_status') {
+            $pid = trim($input['id'] ?? $input['patient_id'] ?? '');
+            if (empty($pid)) sendJsonResponse('error', 'ID wajib diisi untuk update status.', null, 400);
+
+            $newStatus = trim($input['status'] ?? '');
+            $dischargeSummary = !empty($input['discharge_summary'] ?? $input['dischargeSummary'])
+                ? (is_string($input['discharge_summary'] ?? $input['dischargeSummary'])
+                    ? ($input['discharge_summary'] ?? $input['dischargeSummary'])
+                    : json_encode($input['discharge_summary'] ?? $input['dischargeSummary'], JSON_UNESCAPED_UNICODE))
+                : null;
+
+            $statusMap = [
+                'rawat_nicu'   => 'Rawat NICU',
+                'rawat nicu'   => 'Rawat NICU',
+                'siap_pulang'  => 'Siap Pulang',
+                'siap pulang'  => 'Siap Pulang',
+                'sudah_pulang' => 'Sudah Pulang',
+                'sudah pulang' => 'Sudah Pulang',
+                'pulang'       => 'Sudah Pulang'
+            ];
+            $normalizedStatus = $statusMap[strtolower($newStatus)] ?? $newStatus;
+            if (empty($normalizedStatus)) {
+                sendJsonResponse('error', 'Status baru wajib diisi.', null, 400);
+            }
+
+            $dischargedAtSql = ($normalizedStatus === 'Sudah Pulang') ? "COALESCE(`discharged_at`, NOW())" : "NULL";
+            $sql = "UPDATE `patients` 
+                    SET `status` = :status,
+                        `discharged_at` = {$dischargedAtSql},
+                        `discharge_summary` = COALESCE(:disc_summary, `discharge_summary`),
+                        `updated_at` = NOW() 
+                    WHERE `id` = :id";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':status'       => $normalizedStatus,
+                ':disc_summary' => $dischargeSummary,
+                ':id'           => $pid
+            ]);
+            sendJsonResponse('success', "Status pasien berhasil diubah menjadi '{$normalizedStatus}'.", [
+                'id'             => $pid,
+                'status'         => $normalizedStatus,
+                'discharge_time' => date('c')
+            ]);
         }
 
         $id            = trim($input['id'] ?? ('p_' . time() . '_' . substr(md5(uniqid()), 0, 5)));
@@ -189,6 +235,7 @@ if ($method === 'POST') {
         $mrn           = trim($input['medical_record_number'] ?? $input['medicalRecordNumber'] ?? '');
         $room          = trim($input['room_number'] ?? $input['roomNumber'] ?? '');
         $cover         = $input['cover_photo_url'] ?? $input['coverPhotoUrl'] ?? null;
+        $isDeleted     = (isset($input['is_deleted']) && ($input['is_deleted'] === 1 || $input['is_deleted'] === '1' || $input['is_deleted'] === true)) ? 1 : 0;
         
         $initialAnthro = !empty($input['initial_anthropometry'] ?? $input['initialAnthropometry']) ? json_encode($input['initial_anthropometry'] ?? $input['initialAnthropometry'], JSON_UNESCAPED_UNICODE) : null;
         $currentEquip  = !empty($input['current_equipment'] ?? $input['currentEquipment']) ? json_encode($input['current_equipment'] ?? $input['currentEquipment'], JSON_UNESCAPED_UNICODE) : null;
@@ -216,7 +263,7 @@ if ($method === 'POST') {
                 :status, :mrn, :room, :cover,
                 :anthro, :cur_eq, :reg_eq,
                 :miles, :immu, :disc_sum, :disc_at,
-                0, 1, NOW(), NOW()
+                :is_del, 1, NOW(), NOW()
             )
             ON DUPLICATE KEY UPDATE
                 nickname               = VALUES(nickname),
@@ -240,7 +287,7 @@ if ($method === 'POST') {
                 immunization_discharge = VALUES(immunization_discharge),
                 discharge_summary      = VALUES(discharge_summary),
                 discharged_at          = VALUES(discharged_at),
-                is_deleted             = 0,
+                is_deleted             = VALUES(is_deleted),
                 updated_at             = NOW()
         ");
 
@@ -266,7 +313,8 @@ if ($method === 'POST') {
             ':miles'    => $milestones,
             ':immu'     => $immu,
             ':disc_sum' => $discSummary,
-            ':disc_at'  => $discAt
+            ':disc_at'  => $discAt,
+            ':is_del'   => $isDeleted
         ]);
 
         sendJsonResponse('success', "Data pasien '{$babyName}' berhasil disimpan.", ['id' => $id]);

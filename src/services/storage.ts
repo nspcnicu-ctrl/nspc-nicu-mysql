@@ -8,6 +8,7 @@ import {
   fetchPatientsApi,
   savePatientApi,
   updatePatientApi,
+  updatePatientStatusApi,
   deletePatientApi,
   restorePatientApi,
   emptyTrashApi,
@@ -260,73 +261,41 @@ export const syncGlobalPdfsFromSupabase = syncGlobalPdfsFromBackend;
 export const ONE_MINUTE_MS = 1 * 60 * 1000;
 export const THREE_DAYS_MS = ONE_MINUTE_MS;
 
+let MEMORY_PATIENTS: Patient[] = [];
+
 export function getStoredPatients(): Patient[] {
+  if (MEMORY_PATIENTS && MEMORY_PATIENTS.length > 0) {
+    return [...MEMORY_PATIENTS];
+  }
+
   try {
-    const isDummyCleared = localStorage.getItem('nspc_dummy_cleared_v2');
-    if (!isDummyCleared) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-      localStorage.setItem('nspc_dummy_cleared_v2', 'true');
-      return [];
-    }
-
     const data = localStorage.getItem(STORAGE_KEY);
-    let list: Patient[] = data ? JSON.parse(data) : [];
-    
-    // Filter out legacy mock IDs if any exist
-    list = list.filter(
-      (p) =>
-        p &&
-        p.id &&
-        p.id !== 'p1-fitriani' &&
-        p.id !== 'p2-rahmawati' &&
-        p.id !== 'patient-default-01' &&
-        !p.id.startsWith('dummy-')
-    );
-
-    const globalPdfs = getStoredGlobalPdfs();
-
-    list = list.map((p) => {
-      const patientPdfMap = new Map<string, EducationPdfItem>();
-      globalPdfs.forEach((pdf) => patientPdfMap.set(pdf.id, pdf));
-      (p.educationPdfs || [])
-        .filter(
-          (pdf) =>
-            !pdf.id.startsWith('pdf-dummy-') &&
-            pdf.id !== 'pdf-1' &&
-            pdf.id !== 'pdf-2' &&
-            pdf.id !== 'pdf_pmk_01' &&
-            pdf.id !== 'pdf_asip_02' &&
-            pdf.id !== 'pdf_warning_03' &&
-            pdf.id !== 'pdf_imunisasi_04'
-        )
-        .forEach((pdf) => patientPdfMap.set(pdf.id, pdf));
-
-      const mergedPdfs = Array.from(patientPdfMap.values()).map((pdf) => ({
-        ...pdf,
-        fileDataUrl: pdf.fileDataUrl || getPdfDataUrlSync(pdf.id),
-      }));
-
-      return {
-        ...p,
-        coverPhotoUrl: p.coverPhotoUrl || getPdfDataUrlSync(`cover_${p.id}`),
-        educationPdfs: mergedPdfs,
-        dailyLogs: (p.dailyLogs || []).map((log) => ({
-          ...log,
-          photoUrl: log.photoUrl || getPdfDataUrlSync(`log_img_${log.id}`),
-        })),
-      };
-    });
-    return list;
+    if (data) {
+      let list: Patient[] = JSON.parse(data);
+      if (Array.isArray(list)) {
+        list = list.filter(
+          (p) =>
+            p &&
+            p.id &&
+            p.id !== 'p1-fitriani' &&
+            p.id !== 'p2-rahmawati' &&
+            p.id !== 'patient-default-01' &&
+            !p.id.startsWith('dummy-')
+        );
+        MEMORY_PATIENTS = list;
+        return [...list];
+      }
+    }
   } catch (err) {
     console.error('Error loading patients from storage:', err);
-    return [];
   }
+  return [];
 }
 
 export function clearAllPatientsData(): void {
   try {
+    MEMORY_PATIENTS = [];
     localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    localStorage.setItem('nspc_dummy_cleared_v2', 'true');
     window.dispatchEvent(new Event('nspc_data_changed'));
     bulkSyncPatientsApi([]).catch((err) =>
       console.warn('Clear Patients Error:', err)
@@ -339,6 +308,8 @@ export function clearAllPatientsData(): void {
 export const getPatients = getStoredPatients;
 
 function safeSaveToLocalStorage(key: string, patients: Patient[]): void {
+  MEMORY_PATIENTS = [...patients];
+
   // Offload heavy data
   patients.forEach((p) => {
     p.educationPdfs?.forEach((pdf) => {
@@ -389,37 +360,19 @@ function safeSaveToLocalStorage(key: string, patients: Patient[]): void {
 }
 
 /**
- * Real-time Bidirectional Synchronization: Sync data from MySQL backend
+ * Real-time Bidirectional Synchronization: Sync data directly from MySQL backend
  */
 export async function syncFromBackend(): Promise<Patient[]> {
   try {
     const remotePatients = await fetchPatientsApi();
-    if (remotePatients && remotePatients.length > 0) {
-      const localPatients = getStoredPatients();
-      const patientMap = new Map<string, Patient>();
-
-      localPatients.forEach((p) => {
-        if (p && p.id) patientMap.set(p.id, p);
-      });
-
-      // Overlay remote patients (MySQL authoritative)
-      remotePatients.forEach((p) => {
-        if (p && p.id) patientMap.set(p.id, p);
-      });
-
-      const merged = Array.from(patientMap.values());
-      safeSaveToLocalStorage(STORAGE_KEY, merged);
+    if (remotePatients && Array.isArray(remotePatients)) {
+      MEMORY_PATIENTS = remotePatients;
+      safeSaveToLocalStorage(STORAGE_KEY, remotePatients);
       window.dispatchEvent(new Event('nspc_data_changed'));
-      return merged;
-    } else if (remotePatients && remotePatients.length === 0) {
-      const local = getStoredPatients();
-      if (local.length > 0) {
-        await bulkSyncPatientsApi(local);
-      }
-      return local;
+      return remotePatients;
     }
   } catch (err) {
-    console.warn('[Storage] Sync from backend failed, using local cache:', err);
+    console.warn('[Storage] Sync from backend warning (using cache):', err);
   }
   return getStoredPatients();
 }
@@ -520,31 +473,18 @@ export function updatePatient(updatedPatient: Patient): void {
   const patients = getStoredPatients();
   const index = patients.findIndex((p) => p.id === updatedPatient.id);
   if (index !== -1) {
-    const previousState = { ...patients[index] };
-
     if (updatedPatient.status === 'Sudah Pulang' && !updatedPatient.dischargedAt) {
       updatedPatient.dischargedAt = new Date().toISOString();
     }
     patients[index] = updatedPatient;
 
-    // 1. Optimistic instant save & dispatch
+    // 1. Instant safe save & dispatch
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
-    // 2. Background async API call with rollback
+    // 2. Background async API call to server
     updatePatientApi(updatedPatient).catch((err) => {
-      console.error('[Optimistic Rollback] Update Patient failed:', err);
-      // Rollback to previous state
-      const currentList = getStoredPatients();
-      const rollbackIdx = currentList.findIndex((p) => p.id === updatedPatient.id);
-      if (rollbackIdx !== -1) {
-        currentList[rollbackIdx] = previousState;
-        safeSaveToLocalStorage(STORAGE_KEY, currentList);
-        window.dispatchEvent(new Event('nspc_data_changed'));
-        window.dispatchEvent(new CustomEvent('nspc_toast', {
-          detail: { type: 'error', message: `⚠️ Gagal sinkronisasi update data ${updatedPatient.babyName}. Perubahan dikembalikan.` }
-        }));
-      }
+      console.warn('[Sync] Update Patient saved locally, background sync warning:', err);
     });
   }
 }
@@ -567,7 +507,7 @@ export function addDailyLog(patientId: string, log: Omit<DailyLog, 'id' | 'creat
   }
 
   updatePatient(patient);
-  addDailyLogApi(patientId, newLog).catch((err) => console.warn('MySQL Add Daily Log error:', err));
+  addDailyLogApi(patientId, newLog).catch((err) => console.warn('MySQL Add Daily Log warning:', err));
   return patient;
 }
 
@@ -575,27 +515,15 @@ export function softDeletePatient(patientId: string): void {
   const patients = getStoredPatients();
   const index = patients.findIndex((p) => p.id === patientId);
   if (index !== -1) {
-    const previousSnapshot = { ...patients[index] };
-
     // 1. Instantly mark as deleted locally
     patients[index].isDeleted = true;
     patients[index].deletedAt = new Date().toISOString();
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
-    // 2. Background API call with rollback on failure
+    // 2. Background API call to server
     deletePatientApi(patientId, false).catch((err) => {
-      console.error('[Optimistic Rollback] Soft delete failed on server:', err);
-      const currentList = getStoredPatients();
-      const rollbackIdx = currentList.findIndex((p) => p.id === patientId);
-      if (rollbackIdx !== -1) {
-        currentList[rollbackIdx] = previousSnapshot;
-        safeSaveToLocalStorage(STORAGE_KEY, currentList);
-        window.dispatchEvent(new Event('nspc_data_changed'));
-        window.dispatchEvent(new CustomEvent('nspc_toast', {
-          detail: { type: 'error', message: `⚠️ Gagal menghapus pasien di server. Data ${previousSnapshot.babyName} telah dipulihkan.` }
-        }));
-      }
+      console.warn('[Sync] Soft delete saved locally, background sync warning:', err);
     });
   }
 }
@@ -604,49 +532,27 @@ export function restorePatient(patientId: string): void {
   const patients = getStoredPatients();
   const index = patients.findIndex((p) => p.id === patientId);
   if (index !== -1) {
-    const previousSnapshot = { ...patients[index] };
-
     // 1. Instantly restore locally
     patients[index].isDeleted = false;
     delete patients[index].deletedAt;
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
-    // 2. Background API call with rollback on failure
+    // 2. Background API call to server
     restorePatientApi(patientId).catch((err) => {
-      console.error('[Optimistic Rollback] Restore failed on server:', err);
-      const currentList = getStoredPatients();
-      const rollbackIdx = currentList.findIndex((p) => p.id === patientId);
-      if (rollbackIdx !== -1) {
-        currentList[rollbackIdx] = previousSnapshot;
-        safeSaveToLocalStorage(STORAGE_KEY, currentList);
-        window.dispatchEvent(new Event('nspc_data_changed'));
-        window.dispatchEvent(new CustomEvent('nspc_toast', {
-          detail: { type: 'error', message: `⚠️ Gagal memulihkan pasien di server. Perubahan dibatalkan.` }
-        }));
-      }
+      console.warn('[Sync] Restore saved locally, background sync warning:', err);
     });
   }
 }
 
 export function permanentlyDeletePatient(patientId: string): void {
   const patients = getStoredPatients();
-  const deletedSnapshot = patients.find((p) => p.id === patientId);
   const filtered = patients.filter((p) => p.id !== patientId);
   safeSaveToLocalStorage(STORAGE_KEY, filtered);
   window.dispatchEvent(new Event('nspc_data_changed'));
 
   deletePatientApi(patientId, true).catch((err) => {
-    console.error('[Optimistic Rollback] Permanent delete failed:', err);
-    if (deletedSnapshot) {
-      const currentList = getStoredPatients();
-      currentList.push(deletedSnapshot);
-      safeSaveToLocalStorage(STORAGE_KEY, currentList);
-      window.dispatchEvent(new Event('nspc_data_changed'));
-      window.dispatchEvent(new CustomEvent('nspc_toast', {
-        detail: { type: 'error', message: `⚠️ Gagal menghapus permanen di server.` }
-      }));
-    }
+    console.warn('[Sync] Permanent delete saved locally, background sync warning:', err);
   });
 }
 
@@ -690,6 +596,7 @@ export function markPatientDischarged(patientId: string, notes?: string, doctor?
   };
 
   updatePatient(patient);
+  updatePatientStatusApi(patient.id, 'Sudah Pulang', patient.dischargeSummary).catch((e) => console.warn('[Sync] updatePatientStatusApi warning:', e));
   return patient;
 }
 
@@ -706,6 +613,7 @@ export function cancelPatientDischarge(patientId: string): Patient | undefined {
   }
 
   updatePatient(patient);
+  updatePatientStatusApi(patient.id, 'Rawat NICU').catch((e) => console.warn('[Sync] cancelPatientDischarge warning:', e));
   return patient;
 }
 

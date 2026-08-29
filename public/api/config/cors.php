@@ -42,6 +42,31 @@ function sendJsonResponse($status, $message, $data = null, $httpCode = 200) {
     sendResponse($status, $message, $data, $httpCode);
 }
 
+function sanitizeString($val) {
+    if ($val === null) return '';
+    return is_string($val) ? trim($val) : (string)$val;
+}
+
+function recordSystemEvent($pdo, $eventType, $entityId, $details = []) {
+    // Safe placeholder or audit logger if table exists
+    try {
+        if ($pdo instanceof PDO) {
+            $stmt = $pdo->prepare("SHOW TABLES LIKE 'system_events'");
+            $stmt->execute();
+            if ($stmt->fetch()) {
+                $ins = $pdo->prepare("INSERT INTO system_events (event_type, entity_id, details, created_at) VALUES (:ev, :ent, :dt, NOW())");
+                $ins->execute([
+                    ':ev'  => $eventType,
+                    ':ent' => $entityId,
+                    ':dt'  => json_encode($details, JSON_UNESCAPED_UNICODE)
+                ]);
+            }
+        }
+    } catch (Throwable $e) {
+        // Suppress non-critical audit log errors
+    }
+}
+
 function getJsonInput() {
     $raw = file_get_contents('php://input');
     if (empty($raw)) return [];

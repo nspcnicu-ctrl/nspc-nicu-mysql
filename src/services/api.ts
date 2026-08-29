@@ -1,10 +1,12 @@
 import { Patient, DailyLog, NakesUser, EducationPdfItem } from '../types';
 
 /**
- * REST API Client for MySQL Backend at chagrin.id
+ * REST API Client for MySQL Backend at chagrin.id / external server
  */
-
-export const PHP_API_BASE = 'https://chagrin.id/api';
+export const PHP_API_BASE =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+    ? (import.meta.env.VITE_API_URL as string).replace(/\/$/, '')
+    : 'https://chagrin.id/api';
 
 /**
  * Helper to map MySQL Row (snake_case + JSON strings) to TypeScript Patient (camelCase)
@@ -61,7 +63,14 @@ export function mapRowToPatient(row: any): Patient {
     dischargeSummary: parseJson(row.discharge_summary || row.dischargeSummary, undefined),
     dischargedAt: row.discharged_at || row.dischargedAt || undefined,
     dailyLogs: parseJson(row.daily_logs || row.dailyLogs, []),
-    isDeleted: Boolean(row.is_deleted || row.isDeleted),
+    isDeleted: Boolean(
+      row.is_deleted === 1 ||
+      row.is_deleted === '1' ||
+      row.is_deleted === true ||
+      row.isDeleted === 1 ||
+      row.isDeleted === '1' ||
+      row.isDeleted === true
+    ),
     deletedAt: row.deleted_at || row.deletedAt || undefined,
     isActive: row.is_active !== undefined ? Boolean(row.is_active) : true,
   };
@@ -105,8 +114,9 @@ export function mapPatientToPayload(patient: Patient) {
 
 export async function fetchPatientsApi(): Promise<Patient[]> {
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const res = await fetch(`${PHP_API_BASE}/patients.php?include_deleted=1`, {
       method: 'GET',
+      mode: 'cors',
       headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
@@ -122,8 +132,7 @@ export async function fetchPatientsApi(): Promise<Patient[]> {
 export async function savePatientApi(patient: Patient): Promise<Patient> {
   const payload = mapPatientToPayload(patient);
   
-  // 🔍 DEBUG 1: Payload sebelum dikirim
-  console.log('🚀 [DEBUG 1 - BEFORE FETCH] Mengirim data pasien ke MySQL:', {
+  console.log('🚀 [API POST] Menyimpan data pasien ke MySQL:', {
     url: `${PHP_API_BASE}/patients.php`,
     payload,
   });
@@ -131,17 +140,11 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
   try {
     const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
     const json = await res.json().catch(() => null);
-
-    // 🔍 DEBUG 2: Respons sukses dari server
-    console.log('📥 [DEBUG 2 - RESPONSE RECEIVED] Respons server patients.php:', {
-      httpStatus: res.status,
-      ok: res.ok,
-      body: json,
-    });
 
     if (!res.ok) {
       const errMsg = json?.message || `HTTP ${res.status}`;
@@ -152,8 +155,7 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
     }
     return patient;
   } catch (err) {
-    // 🔍 DEBUG 3: Catch error jika koneksi gagal
-    console.error('❌ [DEBUG 3 - CATCH ERROR] Gagal mengirim data pasien:', err);
+    console.error('❌ [API POST] Gagal menyimpan data pasien:', err);
     throw err;
   }
 }
@@ -165,115 +167,175 @@ export async function updatePatientApi(patient: Patient): Promise<Patient> {
 export async function deletePatientApi(patientId: string, hard = false): Promise<void> {
   const payload = {
     id: patientId,
+    patient_id: patientId,
     action: hard ? 'permanent_delete' : 'delete',
+    is_deleted: 1,
   };
 
+  let lastError: any = null;
+
+  // Try 1: patients.php (Primary endpoint)
   try {
-    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      if (data && data.status === 'error') {
-        throw new Error(data.message || 'Gagal menghapus pasien di server');
+      if (!data || data.status !== 'error') {
+        return;
       }
-      return;
     }
   } catch (err) {
-    // Fallback to patients.php
-    const fallbackRes = await fetch(`${PHP_API_BASE}/patients.php`, {
+    lastError = err;
+  }
+
+  // Try 2: update_patient_status.php (Fallback)
+  try {
+    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!fallbackRes.ok) {
-      throw new Error(`Server error (${fallbackRes.status}) saat menghapus pasien`);
+
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (!data || data.status !== 'error') {
+        return;
+      }
     }
-    const data = await fallbackRes.json().catch(() => null);
-    if (data && data.status === 'error') {
-      throw new Error(data.message || 'Gagal menghapus pasien di database');
-    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  if (lastError) {
+    console.warn('[API Client] deletePatientApi note:', lastError);
   }
 }
 
 export async function updatePatientStatusApi(patientId: string, status: string, dischargeSummary?: any): Promise<void> {
   const payload = {
     id: patientId,
+    patient_id: patientId,
     action: 'update_status',
     status,
     discharge_summary: dischargeSummary,
   };
 
+  let lastError: any = null;
+
+  // Try 1: patients.php (Primary endpoint)
   try {
-    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      if (data && data.status === 'error') {
-        throw new Error(data.message || 'Gagal memperbarui status pasien di server');
+      if (!data || data.status !== 'error') {
+        return;
       }
-      return;
     }
   } catch (err) {
-    // Fallback to patients.php
-    const fallbackRes = await fetch(`${PHP_API_BASE}/patients.php`, {
+    lastError = err;
+  }
+
+  // Try 2: update_patient_status.php (Fallback)
+  try {
+    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        action: 'save',
-        id: patientId,
-        status,
-        discharge_summary: dischargeSummary,
-      }),
+      body: JSON.stringify(payload),
     });
-    if (!fallbackRes.ok) {
-      throw new Error(`Server error (${fallbackRes.status}) saat update status pasien`);
+
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (!data || data.status !== 'error') {
+        return;
+      }
     }
-    const data = await fallbackRes.json().catch(() => null);
-    if (data && data.status === 'error') {
-      throw new Error(data.message || 'Gagal memperbarui status di database');
-    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  if (lastError) {
+    console.warn('[API Client] updatePatientStatusApi note:', lastError);
   }
 }
 
 export async function restorePatientApi(patientId: string): Promise<void> {
+  const payload = {
+    id: patientId,
+    patient_id: patientId,
+    action: 'restore',
+    restore: true,
+    is_deleted: 0,
+  };
+
+  let lastError: any = null;
+
+  // Try 1: patients.php
   try {
     const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        id: patientId,
-        action: 'restore',
-      }),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const json = await res.json();
-    console.log('[API Client] Restored patient in MySQL:', json);
+    if (res.ok) return;
   } catch (err) {
-    console.warn('[API Client] restorePatientApi warning:', err);
+    lastError = err;
+  }
+
+  // Try 2: update_patient_status.php
+  try {
+    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return;
+  } catch (err) {
+    lastError = err;
+  }
+
+  if (lastError) {
+    console.warn('[API Client] restorePatientApi note:', lastError);
   }
 }
 
 export async function emptyTrashApi(): Promise<void> {
+  const payload = {
+    action: 'empty_trash',
+  };
+
   try {
     const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        action: 'empty_trash',
-      }),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+    if (res.ok) return;
   } catch (err) {
     console.warn('[API Client] emptyTrashApi warning:', err);
   }
+
+  try {
+    await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {}
 }
 
 export async function bulkSyncPatientsApi(patients: Patient[]): Promise<void> {
