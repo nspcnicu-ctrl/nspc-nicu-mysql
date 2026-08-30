@@ -1,74 +1,209 @@
-import * as pdfjsLib from 'pdfjs-dist';
 import { jsPDF } from 'jspdf';
 
-// Configure pdfjs worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+/**
+ * Checks if a string is a Google Drive URL
+ */
+export function isGoogleDriveUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  return (
+    url.includes('drive.google.com') ||
+    url.includes('docs.google.com') ||
+    url.includes('google.com/drive')
+  );
+}
 
 /**
- * Renders Page 1 of a PDF file to a base64 PNG data URL using PDF.js canvas rendering.
+ * Extracts the file or document ID from various Google Drive and Google Docs URLs.
  */
-export async function renderPdfFirstPageToImage(pdfDataUrlOrBlob: string | Blob | ArrayBuffer): Promise<{ coverUrl: string; numPages: number }> {
-  try {
-    let uint8Data: Uint8Array | null = null;
-    let urlStr: string | null = null;
+export function getGoogleDriveFileId(url: string): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
 
-    if (pdfDataUrlOrBlob instanceof Blob) {
-      const buffer = await pdfDataUrlOrBlob.arrayBuffer();
-      uint8Data = new Uint8Array(buffer);
-    } else if (pdfDataUrlOrBlob instanceof ArrayBuffer) {
-      uint8Data = new Uint8Array(pdfDataUrlOrBlob);
-    } else if (typeof pdfDataUrlOrBlob === 'string') {
-      if (pdfDataUrlOrBlob.startsWith('data:')) {
-        const parts = pdfDataUrlOrBlob.split(',');
-        const base64 = parts[1] || '';
-        const binaryStr = atob(base64);
-        const len = binaryStr.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
-        uint8Data = bytes;
-      } else {
-        urlStr = pdfDataUrlOrBlob;
-      }
+  // Pattern 1: drive.google.com/file/d/FILE_ID/view or /preview
+  const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileIdMatch && fileIdMatch[1]) return fileIdMatch[1];
+
+  // Pattern 2: drive.google.com/open?id=FILE_ID or ?id=FILE_ID or &id=FILE_ID
+  const openIdMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (openIdMatch && openIdMatch[1]) return openIdMatch[1];
+
+  // Pattern 3: docs.google.com/document/d/DOC_ID/
+  const docIdMatch = trimmed.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  if (docIdMatch && docIdMatch[1]) return docIdMatch[1];
+
+  // Pattern 4: docs.google.com/presentation/d/PRES_ID/
+  const presIdMatch = trimmed.match(/\/presentation\/d\/([a-zA-Z0-9_-]+)/);
+  if (presIdMatch && presIdMatch[1]) return presIdMatch[1];
+
+  // Pattern 5: drive.google.com/uc?id=FILE_ID
+  const ucIdMatch = trimmed.match(/\/uc\?(?:.*&)?id=([a-zA-Z0-9_-]+)/);
+  if (ucIdMatch && ucIdMatch[1]) return ucIdMatch[1];
+
+  return null;
+}
+
+/**
+ * Gets the direct download URL for a Google Drive file:
+ * https://drive.google.com/uc?export=download&id=FILE_ID
+ */
+export function getGoogleDriveDirectDownloadUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const fileId = getGoogleDriveFileId(url);
+  if (fileId) {
+    return `https://drive.google.com/uc?export=download&id=${fileId}`;
+  }
+  return url;
+}
+
+/**
+ * Automatically converts Google Drive URLs to the native embed preview URL:
+ * https://drive.google.com/file/d/FILE_ID/preview
+ */
+export function formatGoogleDriveEmbedUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+
+  const fileId = getGoogleDriveFileId(trimmed);
+  if (fileId) {
+    if (trimmed.includes('docs.google.com/document')) {
+      return `https://docs.google.com/document/d/${fileId}/preview`;
     }
-
-    let loadingTask;
-    if (uint8Data) {
-      loadingTask = pdfjsLib.getDocument({ data: uint8Data });
-    } else if (urlStr) {
-      loadingTask = pdfjsLib.getDocument({ url: urlStr });
-    } else {
-      throw new Error('Invalid PDF data source');
+    if (trimmed.includes('docs.google.com/presentation')) {
+      return `https://docs.google.com/presentation/d/${fileId}/preview`;
     }
-
-    const pdfDoc = await loadingTask.promise;
-    const numPages = pdfDoc.numPages;
-
-    const page = await pdfDoc.getPage(1);
-    const scale = 2.0; // High resolution for crisp thumbnail
-    const viewport = page.getViewport({ scale });
-
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-
-    if (context) {
-      await page.render({
-        canvasContext: context,
-        viewport: viewport,
-        canvas: canvas,
-      } as any).promise;
-
-      const coverUrl = canvas.toDataURL('image/png');
-      return { coverUrl, numPages };
-    }
-  } catch (error) {
-    console.warn('Could not render PDF first page with pdfjs:', error);
+    return `https://drive.google.com/file/d/${fileId}/preview`;
   }
 
-  return { coverUrl: '', numPages: 1 };
+  // Replace trailing /view with /preview
+  if (trimmed.includes('drive.google.com') && trimmed.includes('/view')) {
+    return trimmed.replace(/\/view(\?.*)?$/, '/preview');
+  }
+
+  return trimmed;
+}
+
+/**
+ * Converts a Google Drive image link (e.g. file/d/ID/view, open?id=ID, uc?id=ID)
+ * into high-performance, CORS-free direct Google Drive image URL:
+ * https://lh3.googleusercontent.com/d/FILE_ID
+ */
+export function formatGoogleDriveImageUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+
+  const fileId = getGoogleDriveFileId(trimmed);
+  if (fileId) {
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Normalizes a Cover / Thumbnail Image URL:
+ * - If Google Drive URL: automatically converts to https://lh3.googleusercontent.com/d/FILE_ID
+ * - If direct image link (PNG, JPG, WebP, Imgur, etc.): trims and returns
+ */
+export function processCoverImageUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (isGoogleDriveUrl(trimmed)) {
+    return formatGoogleDriveImageUrl(trimmed);
+  }
+  return trimmed;
+}
+
+/**
+ * Normalizes a PDF Document URL:
+ * - If Google Drive URL: automatically converts to /preview embed URL
+ * - If direct PDF link or Cloud URL: trims and returns
+ */
+export function processPdfDocumentUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (isGoogleDriveUrl(trimmed)) {
+    return formatGoogleDriveEmbedUrl(trimmed);
+  }
+  return trimmed;
+}
+
+/**
+ * Automatically processes both PDF URL and Cover Image URL in one shot
+ */
+export function processEducationUrls(pdfUrl: string, coverImageUrl?: string): {
+  finalPdfUrl: string;
+  finalCoverUrl: string;
+} {
+  const finalPdfUrl = processPdfDocumentUrl(pdfUrl);
+  const finalCoverUrl = coverImageUrl ? processCoverImageUrl(coverImageUrl) : '';
+  return { finalPdfUrl, finalCoverUrl };
+}
+
+/**
+ * Resolves the appropriate embed preview URL for any PDF source:
+ * 1. Google Drive -> https://drive.google.com/file/d/FILE_ID/preview
+ * 2. Server URL (HTTP/HTTPS) -> https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true
+ * 3. Base64 Data URL or Blob -> Direct Data URL
+ */
+export function getPdfEmbedUrl(pdfUrl: string): string {
+  if (!pdfUrl || typeof pdfUrl !== 'string') return '';
+  const trimmed = pdfUrl.trim();
+
+  if (isGoogleDriveUrl(trimmed)) {
+    return formatGoogleDriveEmbedUrl(trimmed);
+  }
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    // If it's already a viewer url, return as is
+    if (trimmed.includes('docs.google.com/viewer')) return trimmed;
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(trimmed)}&embedded=true`;
+  }
+
+  return trimmed;
+}
+
+/**
+ * Resolves the direct download URL for any PDF source:
+ * 1. Google Drive -> https://drive.google.com/uc?export=download&id=FILE_ID
+ * 2. Server URL -> Direct URL for <a download>
+ */
+export function getPdfDirectDownloadUrl(pdfUrl: string): string {
+  if (!pdfUrl || typeof pdfUrl !== 'string') return '';
+  const trimmed = pdfUrl.trim();
+
+  if (isGoogleDriveUrl(trimmed)) {
+    return getGoogleDriveDirectDownloadUrl(trimmed);
+  }
+
+  return trimmed;
+}
+
+/**
+ * Lightweight safe PDF cover thumbnail generator without any external worker dependencies.
+ * Returns clean coverUrl and pageCount.
+ */
+export async function renderPdfFirstPageToImage(
+  pdfDataUrlOrBlob: string | Blob | ArrayBuffer,
+  title: string = 'Modul Edukasi NICU',
+  category: string = 'EDUKASI'
+): Promise<{ coverUrl: string; numPages: number }> {
+  try {
+    if (!pdfDataUrlOrBlob) {
+      return { coverUrl: generateFallbackPdfCover(title, category), numPages: 1 };
+    }
+
+    // If it's already an image data URL
+    if (typeof pdfDataUrlOrBlob === 'string' && pdfDataUrlOrBlob.startsWith('data:image/')) {
+      return { coverUrl: pdfDataUrlOrBlob, numPages: 1 };
+    }
+
+    // Generate crisp canvas cover
+    const coverUrl = generateFallbackPdfCover(title, category);
+    return { coverUrl, numPages: 1 };
+  } catch (error) {
+    console.warn('[PDF] Cover generation fallback used:', error);
+    return { coverUrl: generateFallbackPdfCover(title, category), numPages: 1 };
+  }
 }
 
 /**

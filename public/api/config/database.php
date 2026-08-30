@@ -61,6 +61,18 @@ class DatabaseMigrator {
     }
 
     private static function createBaseTables(PDO $pdo): void {
+        // Tabel Patients
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `patients` (
+                `id` VARCHAR(64) PRIMARY KEY,
+                `nickname` VARCHAR(100) NOT NULL,
+                `baby_name` VARCHAR(255) NOT NULL,
+                `access_password` VARCHAR(100) NOT NULL DEFAULT '123456',
+                `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
         // Tabel Daily Logs
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS `daily_logs` (
@@ -85,6 +97,39 @@ class DatabaseMigrator {
     }
 
     private static function ensureColumnsExist(PDO $pdo): void {
+        // --- PATCH TABEL `patients` ---
+        self::addColumnIfMissing($pdo, 'patients', 'nickname', "VARCHAR(100) NOT NULL DEFAULT '' AFTER `id`");
+        self::addColumnIfMissing($pdo, 'patients', 'access_password', "VARCHAR(100) NOT NULL DEFAULT '123456' AFTER `nickname`");
+        self::addColumnIfMissing($pdo, 'patients', 'baby_name', "VARCHAR(255) NOT NULL DEFAULT '' AFTER `access_password`");
+        self::addColumnIfMissing($pdo, 'patients', 'father_name', "VARCHAR(255) DEFAULT '' AFTER `baby_name`");
+        self::addColumnIfMissing($pdo, 'patients', 'mother_name', "VARCHAR(255) DEFAULT '' AFTER `father_name`");
+        self::addColumnIfMissing($pdo, 'patients', 'parent_name', "VARCHAR(255) DEFAULT '' AFTER `mother_name`");
+        self::addColumnIfMissing($pdo, 'patients', 'parent_phone', "VARCHAR(50) DEFAULT '' AFTER `parent_name`");
+        self::addColumnIfMissing($pdo, 'patients', 'gender', "VARCHAR(30) NOT NULL DEFAULT 'Laki-Laki' AFTER `parent_phone`");
+        self::addColumnIfMissing($pdo, 'patients', 'birth_date', "DATE NOT NULL DEFAULT '2026-01-01' AFTER `gender`");
+        self::addColumnIfMissing($pdo, 'patients', 'birth_time', "VARCHAR(20) DEFAULT '' AFTER `birth_date`");
+        self::addColumnIfMissing($pdo, 'patients', 'admission_date', "DATE NOT NULL DEFAULT '2026-01-01' AFTER `birth_time`");
+        self::addColumnIfMissing($pdo, 'patients', 'gestational_age_weeks', "INT NOT NULL DEFAULT 36 AFTER `admission_date`");
+        self::addColumnIfMissing($pdo, 'patients', 'gestational_age', "INT NOT NULL DEFAULT 36 AFTER `gestational_age_weeks`");
+        self::addColumnIfMissing($pdo, 'patients', 'gestation_category', "VARCHAR(50) NOT NULL DEFAULT 'preterm' AFTER `gestational_age`");
+        self::addColumnIfMissing($pdo, 'patients', 'status', "VARCHAR(50) NOT NULL DEFAULT 'Rawat NICU' AFTER `gestation_category`");
+        self::addColumnIfMissing($pdo, 'patients', 'medical_record_number', "VARCHAR(100) DEFAULT '' AFTER `status`");
+        self::addColumnIfMissing($pdo, 'patients', 'room_number', "VARCHAR(100) DEFAULT '' AFTER `medical_record_number`");
+        self::addColumnIfMissing($pdo, 'patients', 'cover_photo_url', "LONGTEXT DEFAULT NULL AFTER `room_number`");
+        self::addColumnIfMissing($pdo, 'patients', 'initial_anthropometry', "JSON DEFAULT NULL AFTER `cover_photo_url`");
+        self::addColumnIfMissing($pdo, 'patients', 'current_equipment', "JSON DEFAULT NULL AFTER `initial_anthropometry`");
+        self::addColumnIfMissing($pdo, 'patients', 'registered_equipment', "JSON DEFAULT NULL AFTER `current_equipment`");
+        self::addColumnIfMissing($pdo, 'patients', 'required_equipment', "JSON DEFAULT NULL AFTER `registered_equipment`");
+        self::addColumnIfMissing($pdo, 'patients', 'milestones', "JSON DEFAULT NULL AFTER `required_equipment`");
+        self::addColumnIfMissing($pdo, 'patients', 'immunization_discharge', "JSON DEFAULT NULL AFTER `milestones`");
+        self::addColumnIfMissing($pdo, 'patients', 'discharge_summary', "JSON DEFAULT NULL AFTER `immunization_discharge`");
+        self::addColumnIfMissing($pdo, 'patients', 'discharged_at', "DATETIME DEFAULT NULL AFTER `discharge_summary`");
+        self::addColumnIfMissing($pdo, 'patients', 'is_deleted', "TINYINT(1) NOT NULL DEFAULT 0 AFTER `discharged_at`");
+        self::addColumnIfMissing($pdo, 'patients', 'deleted_at', "DATETIME DEFAULT NULL AFTER `is_deleted`");
+        self::addColumnIfMissing($pdo, 'patients', 'is_active', "TINYINT(1) NOT NULL DEFAULT 1 AFTER `deleted_at`");
+        self::addColumnIfMissing($pdo, 'patients', 'created_at', "DATETIME DEFAULT CURRENT_TIMESTAMP AFTER `is_active`");
+        self::addColumnIfMissing($pdo, 'patients', 'updated_at', "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`");
+
         // --- PATCH TABEL `daily_logs` ---
         self::addColumnIfMissing($pdo, 'daily_logs', 'log_date', "DATE NOT NULL DEFAULT '2026-01-01' AFTER `patient_id`");
         self::addColumnIfMissing($pdo, 'daily_logs', 'period_label', "VARCHAR(100) NOT NULL DEFAULT 'Pagi' AFTER `log_date`");

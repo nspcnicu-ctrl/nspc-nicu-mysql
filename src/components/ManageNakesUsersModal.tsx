@@ -144,27 +144,28 @@ export const ManageNakesUsersModal: React.FC<ManageNakesUsersModalProps> = ({
 
   const handleDeleteUser = (userToDelete: NakesUser) => {
     if (!canManageAccounts) {
-      alert('Anda tidak memiliki Hak Akses untuk menghapus akun.');
+      setSuccessMsg('Anda tidak memiliki Hak Akses untuk menghapus akun.');
+      setTimeout(() => setSuccessMsg(null), 4000);
       return;
     }
 
     if (userToDelete.isSuperAdmin || userToDelete.username === 'superadmin') {
-      alert('Akun Super Admin Utama tidak dapat dihapus.');
+      setSuccessMsg('Akun Super Admin Utama tidak dapat dihapus.');
+      setTimeout(() => setSuccessMsg(null), 4000);
       return;
     }
 
     if (currentNakesUser && userToDelete.id === currentNakesUser.id) {
-      alert('Anda tidak dapat menghapus akun Anda sendiri saat sedang terhubung.');
+      setSuccessMsg('Anda tidak dapat menghapus akun Anda sendiri saat sedang terhubung.');
+      setTimeout(() => setSuccessMsg(null), 4000);
       return;
     }
 
-    if (window.confirm(`Apakah Anda yakin ingin menghapus akun Nakes "${userToDelete.name}" (${userToDelete.username})?`)) {
-      deleteNakesUser(userToDelete.id);
-      setSuccessMsg(`Akun "${userToDelete.name}" telah dihapus.`);
-      loadUsers();
-      if (onRefreshNakes) onRefreshNakes();
-      setTimeout(() => setSuccessMsg(null), 4000);
-    }
+    deleteNakesUser(userToDelete.id);
+    setSuccessMsg(`Akun "${userToDelete.name}" telah dihapus.`);
+    loadUsers();
+    if (onRefreshNakes) onRefreshNakes();
+    setTimeout(() => setSuccessMsg(null), 4000);
   };
 
   return (

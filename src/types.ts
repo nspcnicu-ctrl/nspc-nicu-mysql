@@ -75,6 +75,17 @@ export interface DailyLog {
   createdAt: string;
   photoUrl?: string;
   photoCaption?: string;
+  // Compatibility and alias properties for robust JSON parsing
+  weight?: number;
+  weight_gram?: number;
+  weight_change_gram?: number;
+  label?: string;
+  dayLabel?: string;
+  period_label?: string;
+  log_date?: string;
+  notes?: string;
+  note?: string;
+  nakes_notes?: string;
 }
 
 export interface DischargeSummary {
@@ -111,6 +122,8 @@ export interface ImmunizationDischargeRecord {
   updatedAt?: string;
 }
 
+export type PatientStatus = 'Rawat NICU' | 'Siap Pulang' | 'Sudah Pulang' | 'deleted' | 'Deleted' | 'Disembunyikan' | string;
+
 export interface Patient {
   id: string;
   nickname: string;
@@ -118,8 +131,11 @@ export interface Patient {
   babyName: string;
   fatherName: string;
   motherName: string;
+  parentName?: string;
+  parentPhone?: string;
   gender: Gender;
   birthDate: string;
+  birthTime?: string;
   admissionDate: string;
   gestationalAgeWeeks: number;
   gestationCategory: GestationCategory;
@@ -128,9 +144,13 @@ export interface Patient {
   registeredEquipment?: EquipmentItem[];
   educationPdfs?: EducationPdfItem[];
   immunizationDischarge?: ImmunizationDischargeRecord;
-  milestones: Milestones;
+  milestones: string[] | Milestones;
   dailyLogs: DailyLog[];
-  status: 'Rawat NICU' | 'Siap Pulang' | 'Sudah Pulang';
+  // Compatibility alias fields for progress logs fallback
+  progressLogs?: DailyLog[];
+  progress_logs?: any[];
+  daily_logs?: any[];
+  status: PatientStatus;
   medicalRecordNumber?: string;
   roomNumber?: string;
   coverPhotoUrl?: string;

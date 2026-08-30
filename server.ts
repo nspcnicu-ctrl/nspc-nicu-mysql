@@ -102,30 +102,218 @@ async function startServer() {
   });
 
   // ---------------------------------------------------------------------------
-  // 3. PATIENTS CRUD API
+  // 3. PATIENTS CRUD API (Supports /api/patients & /api/patients.php)
   // ---------------------------------------------------------------------------
-  app.get('/api/patients', async (req: Request, res: Response) => {
+  app.get(['/api/patients', '/api/patients.php'], async (req: Request, res: Response) => {
     try {
-      const patients = await getAllPatients();
-      res.json({ success: true, data: patients });
+      const includeDeleted =
+        req.query.include_deleted === '1' ||
+        req.query.include_deleted === 'true' ||
+        req.query.all === '1' ||
+        req.query.all_status === '1';
+      const onlyDeleted =
+        req.query.trash === '1' ||
+        req.query.only_deleted === '1' ||
+        String(req.query.status).toLowerCase() === 'deleted';
+
+      const patients = await getAllPatients({ includeDeleted, onlyDeleted });
+      res.json({
+        success: true,
+        status: 'success',
+        total: patients.length,
+        data: patients,
+        items: patients,
+        patients: patients,
+      });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, status: 'error', error: err.message, message: err.message });
     }
   });
 
-  app.post('/api/patients', async (req: Request, res: Response) => {
+  app.post(['/api/patients', '/api/patients.php'], async (req: Request, res: Response) => {
     try {
+      const body = req.body || {};
+      const action = String(body.action || '').toLowerCase();
+      const patientId = String(body.id || body.patient_id || body.patientId || '');
+
+      // 1. Soft Delete
+      if (
+        action === 'delete' ||
+        action === 'soft_delete' ||
+        body.is_deleted === 1 ||
+        body.is_deleted === '1' ||
+        body.is_deleted === true ||
+        body.is_deleted === 'true'
+      ) {
+        if (!patientId) {
+          return res.status(400).json({ success: false, status: 'error', message: 'ID pasien wajib disertakan.' });
+        }
+        await deletePatientById(patientId, false);
+        broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: false });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          success: true,
+          status: 'success',
+          message: 'Pasien berhasil dipindahkan ke sampah.',
+          id: patientId,
+          new_status: 'deleted',
+          is_deleted: true,
+        });
+      }
+
+      // 2. Hard Delete
+      if (action === 'permanent_delete' || action === 'hard_delete') {
+        if (!patientId) {
+          return res.status(400).json({ success: false, status: 'error', message: 'ID pasien wajib disertakan.' });
+        }
+        await deletePatientById(patientId, true);
+        broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: true });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          success: true,
+          status: 'success',
+          message: 'Pasien berhasil dihapus permanen.',
+          id: patientId,
+        });
+      }
+
+      // 3. Restore
+      if (action === 'restore' || body.restore === true || body.restore === 'true') {
+        if (!patientId) {
+          return res.status(400).json({ success: false, status: 'error', message: 'ID pasien wajib disertakan.' });
+        }
+        await restorePatientById(patientId);
+        broadcastRealtimeEvent('patient_restored', { id: patientId });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          success: true,
+          status: 'success',
+          message: 'Pasien berhasil dipulihkan.',
+          id: patientId,
+          new_status: 'Rawat NICU',
+          is_deleted: false,
+        });
+      }
+
+      // 4. Update Status Only
+      if (action === 'update_status' || action === 'set_status') {
+        if (!patientId) {
+          return res.status(400).json({ success: false, status: 'error', message: 'ID pasien wajib disertakan.' });
+        }
+        const currentList = await getAllPatients({ includeDeleted: true });
+        const existing = currentList.find((p) => p.id === patientId);
+        if (existing) {
+          existing.status = body.status || existing.status;
+          if (body.discharge_summary || body.dischargeSummary) {
+            existing.dischargeSummary = body.discharge_summary || body.dischargeSummary;
+          }
+          if (existing.status === 'Sudah Pulang' && !existing.dischargedAt) {
+            existing.dischargedAt = new Date().toISOString();
+          }
+          const saved = await upsertPatient(existing);
+          broadcastRealtimeEvent('patient_updated', saved);
+          broadcastRealtimeEvent('data_changed', { type: 'patient', id: saved.id });
+          return res.json({ success: true, status: 'success', data: saved });
+        }
+      }
+
+      // 5. Upsert Patient
       const patient = req.body;
-      if (!patient || !patient.id || !patient.nickname) {
-        return res.status(400).json({ success: false, error: 'Format data pasien tidak valid.' });
+      if (!patient || !patient.id || (!patient.nickname && !patient.baby_name && !patient.babyName)) {
+        return res.status(400).json({ success: false, status: 'error', error: 'Format data pasien tidak valid.' });
       }
 
       const saved = await upsertPatient(patient);
       broadcastRealtimeEvent('patient_created', saved);
       broadcastRealtimeEvent('data_changed', { type: 'patient', id: saved.id });
-      res.status(201).json({ success: true, data: saved });
+      res.status(200).json({ success: true, status: 'success', data: saved });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, status: 'error', error: err.message, message: err.message });
+    }
+  });
+
+  app.all(['/api/update_patient_status', '/api/update_patient_status.php'], async (req: Request, res: Response) => {
+    try {
+      if (req.method === 'GET') {
+        return res.json({ success: true, status: 'success', message: 'Endpoint update_patient_status siap.' });
+      }
+      const body = req.body || {};
+      const action = String(body.action || '').toLowerCase();
+      const patientId = String(body.id || body.patient_id || body.patientId || '');
+      const isDelParam = body.is_deleted === 1 || body.is_deleted === '1' || body.is_deleted === true || body.is_deleted === 'true';
+      const statusParam = String(body.status || '').toLowerCase();
+
+      if (!patientId && action !== 'empty_trash') {
+        return res.status(400).json({ success: false, status: 'error', message: 'ID pasien wajib disertakan.' });
+      }
+
+      if (action === 'delete' || action === 'soft_delete' || isDelParam || statusParam === 'deleted' || statusParam === 'disembunyikan') {
+        await deletePatientById(patientId, false);
+        broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: false });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: 'Pasien berhasil dipindahkan ke sampah',
+          id: patientId,
+          new_status: 'deleted',
+          is_deleted: true,
+        });
+      }
+
+      if (action === 'permanent_delete' || action === 'hard_delete') {
+        await deletePatientById(patientId, true);
+        broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: true });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: 'Pasien berhasil dihapus permanen.',
+          id: patientId,
+        });
+      }
+
+      if (action === 'restore' || body.restore === true || body.restore === 'true') {
+        await restorePatientById(patientId);
+        broadcastRealtimeEvent('patient_restored', { id: patientId });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: 'Pasien berhasil dipulihkan.',
+          id: patientId,
+          new_status: 'Rawat NICU',
+          is_deleted: false,
+        });
+      }
+
+      // Update status biasa
+      const currentList = await getAllPatients({ includeDeleted: true });
+      const existing = currentList.find((p) => p.id === patientId);
+      if (existing) {
+        existing.status = body.status || 'Rawat NICU';
+        if (body.discharge_summary || body.dischargeSummary) {
+          existing.dischargeSummary = body.discharge_summary || body.dischargeSummary;
+        }
+        if (existing.status === 'Sudah Pulang' && !existing.dischargedAt) {
+          existing.dischargedAt = new Date().toISOString();
+        }
+        const saved = await upsertPatient(existing);
+        broadcastRealtimeEvent('patient_updated', saved);
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: saved.id });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: `Status pasien berhasil diperbarui menjadi '${existing.status}'.`,
+          id: patientId,
+          new_status: existing.status,
+          status_val: existing.status,
+        });
+      }
+
+      res.status(404).json({ success: false, status: 'error', message: 'Pasien tidak ditemukan.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, status: 'error', error: err.message, message: err.message });
     }
   });
 
@@ -391,11 +579,11 @@ async function startServer() {
       const action = (input.action || 'save').toLowerCase();
 
       if (action === 'delete') {
-        const id = input.id || input.pdf_id;
+        const id = input.id || input.pdf_id || (req.query.id as string);
         if (id) await deleteEducationPdfById(id);
         broadcastRealtimeEvent('pdf_deleted', { id });
         broadcastRealtimeEvent('data_changed', { type: 'pdf', id });
-        return res.json({ success: true, status: 'success', message: 'PDF berhasil dihapus' });
+        return res.json({ success: true, status: 'success', message: 'PDF berhasil dihapus', data: { id } });
       }
 
       if (action === 'reorder') {
@@ -405,6 +593,16 @@ async function startServer() {
           broadcastRealtimeEvent('data_changed', { type: 'pdf_reordered' });
         }
         return res.json({ success: true, status: 'success', message: 'Urutan diperbarui' });
+      }
+
+      if (action === 'update' || (input.id && action !== 'create')) {
+        const id = input.id || input.pdf_id;
+        const currentPdfs = await getAllEducationPdfs();
+        const existing = currentPdfs.find((p) => p.id === id);
+        const updated = await upsertEducationPdf({ ...(existing || {}), ...input, id });
+        broadcastRealtimeEvent('pdf_updated', updated);
+        broadcastRealtimeEvent('data_changed', { type: 'pdf', id: updated.id });
+        return res.status(200).json({ success: true, status: 'success', message: 'Data berhasil diupdate', data: updated, item: updated });
       }
 
       if (!input || !input.title) {
@@ -417,6 +615,52 @@ async function startServer() {
       res.status(200).json({ success: true, status: 'success', data: saved, item: saved });
     } catch (err: any) {
       res.status(200).json({ success: false, status: 'error', error: err.message });
+    }
+  });
+
+  app.put(['/api/education-pdfs', '/api/education_pdfs.php', '/api/education-pdfs/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id || req.body?.id || req.body?.pdf_id || (req.query.id as string);
+      if (!id) {
+        return res.status(400).json({ success: false, status: 'error', error: 'ID PDF diperlukan untuk update (PUT).' });
+      }
+
+      // Check if reordering single index
+      if (req.body?.order_index !== undefined || req.body?.orderIndex !== undefined) {
+        const currentPdfs = await getAllEducationPdfs();
+        const existing = currentPdfs.find((p) => p.id === id);
+        if (existing) {
+          existing.orderIndex = Number(req.body.order_index ?? req.body.orderIndex);
+          await upsertEducationPdf(existing);
+          broadcastRealtimeEvent('pdf_updated', existing);
+          broadcastRealtimeEvent('data_changed', { type: 'pdf', id: existing.id });
+          return res.json({ success: true, status: 'success', message: 'Posisi PDF berhasil diperbarui.', data: existing });
+        }
+      }
+
+      const input = { ...req.body, id };
+      const saved = await upsertEducationPdf(input);
+      broadcastRealtimeEvent('pdf_updated', saved);
+      broadcastRealtimeEvent('data_changed', { type: 'pdf', id: saved.id });
+      res.json({ success: true, status: 'success', message: 'Data modul edukasi berhasil diperbarui.', data: saved, item: saved });
+    } catch (err: any) {
+      res.status(500).json({ success: false, status: 'error', error: err.message });
+    }
+  });
+
+  app.delete(['/api/education-pdfs', '/api/education_pdfs.php', '/api/education-pdfs/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id || (req.query.id as string) || req.body?.id || req.body?.pdf_id;
+      if (!id) {
+        return res.status(400).json({ success: false, status: 'error', error: 'ID PDF diperlukan untuk hapus (DELETE).' });
+      }
+
+      await deleteEducationPdfById(id);
+      broadcastRealtimeEvent('pdf_deleted', { id });
+      broadcastRealtimeEvent('data_changed', { type: 'pdf', id });
+      res.json({ success: true, status: 'success', message: 'PDF edukasi berhasil dihapus.', data: { id } });
+    } catch (err: any) {
+      res.status(500).json({ success: false, status: 'error', error: err.message });
     }
   });
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Patient } from '../types';
+import { Patient, DailyLog } from '../types';
 import {
   formatBabyAge,
   formatLengthOfStay,
@@ -13,7 +13,17 @@ interface NspcCardPrintProps {
 }
 
 export const NspcCardPrint: React.FC<NspcCardPrintProps> = ({ patient, onClose }) => {
-  const latestLog = patient.dailyLogs[0];
+  const progressLogs: DailyLog[] = Array.isArray(patient.progressLogs)
+    ? patient.progressLogs
+    : Array.isArray(patient.progress_logs)
+    ? patient.progress_logs
+    : Array.isArray(patient.dailyLogs)
+    ? patient.dailyLogs
+    : Array.isArray(patient.daily_logs)
+    ? patient.daily_logs
+    : [];
+
+  const latestLog = progressLogs[0];
   const isAterm = patient.gestationCategory === 'aterm';
 
   const handlePrint = () => {

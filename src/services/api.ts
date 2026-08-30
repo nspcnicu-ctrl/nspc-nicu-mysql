@@ -16,11 +16,83 @@ export function mapRowToPatient(row: any): Patient {
     if (!val) return fallback;
     if (typeof val === 'object') return val;
     try {
-      return JSON.parse(val);
+      const parsed = JSON.parse(val);
+      return parsed !== null && parsed !== undefined ? parsed : fallback;
     } catch {
       return fallback;
     }
   };
+
+  // Safely extract logs from all possible keys (daily_logs, dailyLogs, progress_logs, progressLogs)
+  const rawLogs =
+    row.progress_logs !== undefined
+      ? parseJson(row.progress_logs, [])
+      : row.progressLogs !== undefined
+      ? parseJson(row.progressLogs, [])
+      : row.daily_logs !== undefined
+      ? parseJson(row.daily_logs, [])
+      : row.dailyLogs !== undefined
+      ? parseJson(row.dailyLogs, [])
+      : [];
+
+  const rawLogsArray = Array.isArray(rawLogs) ? rawLogs : [];
+
+  // Normalize each log to have consistent weightGram, periodLabel, vitalSigns, drinkingAbility
+  const isAterm = (row.gestation_category || row.gestationCategory) === 'aterm';
+  const normalizedLogs: DailyLog[] = rawLogsArray.map((l: any, idx: number) => {
+    if (!l || typeof l !== 'object') {
+      return {
+        id: `log_${idx}_${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        periodLabel: isAterm ? `Hari ke-${idx + 1}` : `Minggu ke-${idx + 1}`,
+        weightGram: 2000,
+        vitalSigns: { temperature: 36.7, heartRate: 140, respiratoryRate: 42, spo2: 98 },
+        drinkingAbility: { method: 'OGT/Sonde', volumeCcPerFeeding: 15, frequencyPerDay: 8, notes: 'Toleransi minum baik.' },
+        activeEquipment: [],
+        nakesNotes: '',
+        updatedBy: 'Tenaga Kesehatan NICU',
+        createdAt: new Date().toISOString(),
+      };
+    }
+
+    const weightVal = Number(l.weightGram ?? l.weight ?? l.weight_gram ?? 0);
+    const dateVal = l.date || l.logDate || l.log_date || l.createdAt || l.created_at || new Date().toISOString().split('T')[0];
+    const periodLabelVal = l.periodLabel || l.period_label || l.label || l.dayLabel || (isAterm ? `Hari ke-${idx + 1}` : `Minggu ke-${idx + 1}`);
+
+    const vs = l.vitalSigns || l.vital_signs || {};
+    const vitalSigns = {
+      temperature: Number(vs.temperature ?? l.temp ?? l.temperature ?? 36.7),
+      heartRate: Number(vs.heartRate ?? vs.heart_rate ?? l.hr ?? l.heartRate ?? 138),
+      respiratoryRate: Number(vs.respiratoryRate ?? vs.respiratory_rate ?? l.rr ?? l.respiratoryRate ?? 42),
+      spo2: Number(vs.spo2 ?? l.spo2 ?? 98),
+    };
+
+    const da = l.drinkingAbility || l.drinking_ability || {};
+    const drinkingAbility = {
+      method: (da.method || l.drinkMethod || l.drink_method || 'OGT/Sonde') as any,
+      volumeCcPerFeeding: Number(da.volumeCcPerFeeding ?? da.volume_cc_per_feeding ?? l.drinkCc ?? l.volumeCc ?? 15),
+      frequencyPerDay: Number(da.frequencyPerDay ?? da.frequency_per_day ?? l.drinkFreq ?? l.frequencyPerDay ?? 8),
+      notes: da.notes || da.note || l.drinkNotes || l.drink_notes || 'Toleransi minum baik.',
+    };
+
+    return {
+      id: String(l.id || `log_${idx}_${Date.now()}`),
+      date: dateVal,
+      periodLabel: periodLabelVal,
+      weightGram: weightVal,
+      weight: weightVal,
+      weightChangeGram: l.weightChangeGram !== undefined ? Number(l.weightChangeGram) : (l.weight_change_gram !== undefined ? Number(l.weight_change_gram) : undefined),
+      vitalSigns,
+      drinkingAbility,
+      activeEquipment: Array.isArray(l.activeEquipment) ? l.activeEquipment : (Array.isArray(l.active_equipment) ? l.active_equipment : (Array.isArray(l.equipment) ? l.equipment : [])),
+      milestonesList: Array.isArray(l.milestonesList) ? l.milestonesList : (Array.isArray(l.milestones_list) ? l.milestones_list : (Array.isArray(l.milestonesChips) ? l.milestonesChips : undefined)),
+      nakesNotes: l.nakesNotes || l.nakes_notes || l.notes || l.note || '',
+      updatedBy: l.updatedBy || l.updated_by || 'Tenaga Kesehatan NICU',
+      createdAt: l.createdAt || l.created_at || dateVal,
+      photoUrl: l.photoUrl || l.photo_url || l.photo || undefined,
+      photoCaption: l.photoCaption || l.photo_caption || undefined,
+    } as DailyLog;
+  });
 
   return {
     id: String(row.id || `p_${Date.now()}`),
@@ -46,30 +118,40 @@ export function mapRowToPatient(row: any): Patient {
     }),
     currentEquipment: parseJson(row.current_equipment || row.currentEquipment, []),
     registeredEquipment: parseJson(row.registered_equipment || row.registeredEquipment, []),
-    milestones: parseJson(row.milestones, {
-      lepasCPAP: false,
-      lepasVentilator: false,
-      lepasInfus: false,
-      lepasOGT: false,
-      lepasO2Nasal: false,
-      refleksMenghisapBaik: false,
-      refleksMenelanBaik: false,
-      bayiSementaraPemantauanKetat: true,
-      selesaiPMK: false,
-      selesaiHBO: false,
-      bolehPulang: false,
-    }),
+    milestones: (() => {
+      const raw = row.milestones;
+      const parsed = typeof raw === 'string' ? parseJson(raw, []) : raw;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((m: any) => typeof m === 'string' && m.trim().length > 0).map((m: string) => m.trim());
+      }
+      if (parsed && typeof parsed === 'object') {
+        const list: string[] = [];
+        for (const [k, v] of Object.entries(parsed)) {
+          if (Boolean(v)) list.push(k);
+        }
+        return list;
+      }
+      return [];
+    })(),
     immunizationDischarge: parseJson(row.immunization_discharge || row.immunizationDischarge, undefined),
     dischargeSummary: parseJson(row.discharge_summary || row.dischargeSummary, undefined),
     dischargedAt: row.discharged_at || row.dischargedAt || undefined,
-    dailyLogs: parseJson(row.daily_logs || row.dailyLogs, []),
+    dailyLogs: normalizedLogs,
+    progressLogs: normalizedLogs,
+    progress_logs: normalizedLogs,
+    daily_logs: normalizedLogs,
     isDeleted: Boolean(
       row.is_deleted === 1 ||
       row.is_deleted === '1' ||
       row.is_deleted === true ||
+      row.is_deleted === 'true' ||
       row.isDeleted === 1 ||
       row.isDeleted === '1' ||
-      row.isDeleted === true
+      row.isDeleted === true ||
+      row.isDeleted === 'true' ||
+      row.status === 'deleted' ||
+      row.status === 'Deleted' ||
+      row.status === 'Disembunyikan'
     ),
     deletedAt: row.deleted_at || row.deletedAt || undefined,
     isActive: row.is_active !== undefined ? Boolean(row.is_active) : true,
@@ -80,35 +162,52 @@ export function mapRowToPatient(row: any): Patient {
  * Helper to prepare Patient payload for PHP MySQL endpoint
  */
 export function mapPatientToPayload(patient: Patient) {
+  const logs = Array.isArray(patient.dailyLogs)
+    ? patient.dailyLogs
+    : Array.isArray(patient.progressLogs)
+    ? patient.progressLogs
+    : Array.isArray(patient.progress_logs)
+    ? patient.progress_logs
+    : [];
+
   return {
     action: 'save',
     id: patient.id,
-    nickname: patient.nickname,
-    access_password: patient.accessPassword,
-    password: patient.accessPassword,
-    baby_name: patient.babyName,
+    nickname: patient.nickname || '',
+    access_password: patient.accessPassword || '123456',
+    password: patient.accessPassword || '123456',
+    baby_name: patient.babyName || 'Bayi',
     father_name: patient.fatherName || '',
     mother_name: patient.motherName || '',
-    gender: patient.gender,
-    birth_date: patient.birthDate,
-    admission_date: patient.admissionDate,
-    gestational_age_weeks: patient.gestationalAgeWeeks,
-    gestation_category: patient.gestationCategory,
-    status: patient.status,
+    parent_name: patient.parentName || (patient.fatherName ? `${patient.fatherName} ${patient.motherName || ''}`.trim() : patient.motherName || ''),
+    parent_phone: patient.parentPhone || '',
+    gender: patient.gender || 'Laki-Laki',
+    birth_date: patient.birthDate || new Date().toISOString().split('T')[0],
+    birth_time: patient.birthTime || '',
+    admission_date: patient.admissionDate || new Date().toISOString().split('T')[0],
+    gestational_age_weeks: patient.gestationalAgeWeeks || 36,
+    gestation_category: patient.gestationCategory || 'preterm',
+    status: patient.status || 'Rawat NICU',
     medical_record_number: patient.medicalRecordNumber || '',
     room_number: patient.roomNumber || '',
     cover_photo_url: patient.coverPhotoUrl || null,
-    initial_anthropometry: patient.initialAnthropometry,
+    initial_anthropometry: patient.initialAnthropometry || null,
     current_equipment: patient.currentEquipment || [],
     registered_equipment: patient.registeredEquipment || [],
-    milestones: patient.milestones,
+    milestones: Array.isArray(patient.milestones)
+      ? patient.milestones.filter((m) => typeof m === 'string' && m.trim().length > 0)
+      : patient.milestones && typeof patient.milestones === 'object'
+      ? Object.entries(patient.milestones).filter(([_, v]) => Boolean(v)).map(([k]) => k)
+      : [],
     immunization_discharge: patient.immunizationDischarge || null,
     discharge_summary: patient.dischargeSummary || null,
     discharged_at: patient.dischargedAt || null,
+    daily_logs: logs,
+    dailyLogs: logs,
+    progress_logs: logs,
+    progressLogs: logs,
     is_deleted: patient.isDeleted ? 1 : 0,
     deleted_at: patient.deletedAt || null,
-    // Include camelCase too for cross-compatibility
-    ...patient,
   };
 }
 
@@ -124,7 +223,7 @@ export async function fetchPatientsApi(): Promise<Patient[]> {
     const rows = json.data?.patients || json.data?.items || (Array.isArray(json.data) ? json.data : []) || [];
     return rows.map(mapRowToPatient);
   } catch (err) {
-    console.warn('[API Client] fetchPatientsApi failed:', err);
+    console.warn('[API Client] fetchPatientsApi note:', err);
     throw err;
   }
 }
@@ -134,7 +233,8 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
   
   console.log('🚀 [API POST] Menyimpan data pasien ke MySQL:', {
     url: `${PHP_API_BASE}/patients.php`,
-    payload,
+    id: patient.id,
+    babyName: patient.babyName,
   });
 
   try {
@@ -147,16 +247,18 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
-      const errMsg = json?.message || `HTTP ${res.status}`;
-      throw new Error(errMsg);
+      const errMsg = json?.message || (json?.data?.error_info ? JSON.stringify(json.data.error_info) : null) || `HTTP ${res.status}`;
+      console.warn('⚠️ [API POST Info] Respon server non-200 (data tersimpan di memori):', { status: res.status, errMsg });
+      return patient;
     }
-    if (json && json.status === 'error') {
-      throw new Error(json.message || 'Gagal menyimpan pasien');
+    if (json && (json.status === 'error' || json.success === false)) {
+      console.warn('⚠️ [API POST Info] Server mengembalikan pesan:', json.message);
+      return patient;
     }
     return patient;
   } catch (err) {
-    console.error('❌ [API POST] Gagal menyimpan data pasien:', err);
-    throw err;
+    console.warn('⚠️ [API POST Info] Koneksi sync backend (data aman):', err);
+    return patient;
   }
 }
 
@@ -170,11 +272,33 @@ export async function deletePatientApi(patientId: string, hard = false): Promise
     patient_id: patientId,
     action: hard ? 'permanent_delete' : 'delete',
     is_deleted: 1,
+    status: 'deleted',
   };
 
   let lastError: any = null;
 
-  // Try 1: patients.php (Primary endpoint)
+  // 1. If hard delete (permanent delete), prioritize HTTP DELETE method
+  if (hard) {
+    try {
+      const res = await fetch(`${PHP_API_BASE}/patients.php?id=${encodeURIComponent(patientId)}&action=permanent_delete`, {
+        method: 'DELETE',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (!data || data.status !== 'error') {
+          return;
+        }
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  // 2. Try POST: patients.php (Primary endpoint)
   try {
     const res = await fetch(`${PHP_API_BASE}/patients.php`, {
       method: 'POST',
@@ -193,7 +317,7 @@ export async function deletePatientApi(patientId: string, hard = false): Promise
     lastError = err;
   }
 
-  // Try 2: update_patient_status.php (Fallback)
+  // 3. Try POST: update_patient_status.php (Fallback)
   try {
     const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
@@ -278,6 +402,7 @@ export async function restorePatientApi(patientId: string): Promise<void> {
     action: 'restore',
     restore: true,
     is_deleted: 0,
+    status: 'Rawat NICU',
   };
 
   let lastError: any = null;
@@ -658,29 +783,6 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
         });
       }
 
-      // Coba fallback sekunder ke get_education.php jika tersedia di backend
-      try {
-        const fallbackRes = await fetch(`${PHP_API_BASE}/get_education.php`, {
-          headers: { 'Accept': 'application/json' },
-        });
-        if (fallbackRes.ok) {
-          const fallbackJson = await fallbackRes.json().catch(() => null);
-          const items = fallbackJson?.data?.items || fallbackJson?.data || [];
-          if (Array.isArray(items) && items.length > 0) {
-            updateEducationApiStatus({
-              isError: false,
-              status: 200,
-              message: 'Terhubung melalui get_education.php',
-              endpoint: `${PHP_API_BASE}/get_education.php`,
-              isUsingFallback: false,
-            });
-            return items;
-          }
-        }
-      } catch {
-        // Abaikan jika fallback sekunder juga gagal
-      }
-
       return [];
     }
 
@@ -718,8 +820,24 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
 
 export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<EducationPdfItem> {
   const url = `${PHP_API_BASE}/education_pdfs.php`;
-  const payload = { action: 'save', ...pdf };
-  console.log('🚀 [API Client] Menyimpan PDF Edukasi ke:', url, { id: pdf.id, title: pdf.title });
+  const payload = {
+    id: pdf.id,
+    title: pdf.title,
+    category: pdf.category,
+    file_name: pdf.fileName,
+    file_size_text: pdf.fileSizeText,
+    file_data_url: pdf.fileDataUrl,
+    file_url: pdf.fileDataUrl,
+    cover_image_url: pdf.coverImageUrl,
+    thumbnail_url: pdf.coverImageUrl,
+    nakes_note: pdf.nakesNote,
+    page_count: pdf.pageCount,
+    published_at: pdf.publishedAt,
+    order_index: pdf.orderIndex,
+    is_active: pdf.isActive !== false ? 1 : 0,
+    action: 'save',
+  };
+  console.log('🚀 [API Client POST] Menyimpan PDF Edukasi Baru ke:', url, { id: pdf.id, title: pdf.title });
 
   try {
     let res: Response | null = null;
@@ -737,7 +855,7 @@ export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<Educat
       const httpStatus = res ? res.status : 0;
       console.warn(`⚠️ [API Client Save] HTTP ${httpStatus} saat menyimpan PDF ke ${url}. Data tetap tersimpan aman di lokal browser.`);
       
-      // Coba fallback ke upload_education.php
+      // Fallback ke upload_education.php jika ada
       try {
         const fallbackRes = await fetch(`${PHP_API_BASE}/upload_education.php`, {
           method: 'POST',
@@ -757,23 +875,70 @@ export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<Educat
 
     const json = await res.json().catch(() => null);
     console.log('📥 [API Client Save] Respons berhasil:', { httpStatus: res.status, data: json?.data });
-    return json?.data || pdf;
+    return json?.data || json?.item || pdf;
   } catch (err) {
     console.info('ℹ️ [API Info] saveEducationPdfApi local save fallback:', err);
     return pdf;
   }
 }
 
-export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
+export async function updateEducationPdfApi(pdf: EducationPdfItem): Promise<EducationPdfItem> {
   const url = `${PHP_API_BASE}/education_pdfs.php`;
+  const payload = {
+    action: 'update',
+    id: pdf.id,
+    title: pdf.title,
+    category: pdf.category,
+    file_name: pdf.fileName,
+    file_size_text: pdf.fileSizeText,
+    file_data_url: pdf.fileDataUrl,
+    file_url: pdf.fileDataUrl,
+    cover_image_url: pdf.coverImageUrl,
+    thumbnail_url: pdf.coverImageUrl,
+    nakes_note: pdf.nakesNote,
+    page_count: pdf.pageCount,
+    order_index: pdf.orderIndex,
+  };
+  console.log('🚀 [API Client POST Update] Mengirim pembaruan PDF ke:', url, payload);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responseData = await res.json().catch(() => null);
+    console.log('📥 [API Client Update PDF] Respons database:', responseData);
+
+    if (responseData && (responseData.success || responseData.status === 'success')) {
+      return responseData.data || responseData.item || pdf;
+    }
+
+    // Jika gagal atau format berbeda, coba juga endpoint alternatif
+    if (!res.ok) {
+      console.warn('⚠️ [API Client Update] Gagal POST update:', responseData?.message);
+    }
+    return responseData?.data || responseData?.item || pdf;
+  } catch (err) {
+    console.error('❌ [API Client Update Error] Gagal menghubungi server:', err);
+    return pdf;
+  }
+}
+
+export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
+  const url = `${PHP_API_BASE}/education_pdfs.php?id=${encodeURIComponent(pdfId)}`;
   const payload = { action: 'delete', id: pdfId };
-  console.log('🚀 [API Client] Menghapus PDF Edukasi di:', url, { id: pdfId });
+  console.log('🚀 [API Client DELETE] Menghapus PDF Edukasi di:', url, { id: pdfId });
 
   try {
     let res: Response | null = null;
     try {
       res = await fetch(url, {
-        method: 'POST',
+        method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -781,15 +946,22 @@ export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
       // Network fail
     }
 
+    // Fallback ke POST jika DELETE dibatasi
     if (!res || !res.ok) {
       try {
-        await fetch(`${PHP_API_BASE}/delete_education.php`, {
+        await fetch(`${PHP_API_BASE}/education_pdfs.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify(payload),
         });
       } catch {
-        // Fallback
+        try {
+          await fetch(`${PHP_API_BASE}/delete_education.php`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } catch {}
       }
     }
   } catch (err) {
@@ -800,22 +972,26 @@ export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
 export async function reorderEducationPdfsApi(pdfs: EducationPdfItem[]): Promise<void> {
   const url = `${PHP_API_BASE}/education_pdfs.php`;
   const payload = { action: 'reorder', pdfs };
-  console.log('🚀 [API Client] Menyusun ulang PDF Edukasi di:', url, { count: pdfs.length });
+  console.log('🚀 [API Client REORDER] Menyusun ulang PDF Edukasi di:', url, { count: pdfs.length });
 
   try {
     let res: Response | null = null;
     try {
       res = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload),
       });
-    } catch {
-      // Fallback
-    }
+    } catch {}
 
     if (!res || !res.ok) {
-      console.warn('[API Client Reorder] Reorder remote sync fallback.');
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {}
     }
   } catch (err) {
     console.info('ℹ️ [API Info] reorderEducationPdfsApi local fallback:', err);

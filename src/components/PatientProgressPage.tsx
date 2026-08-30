@@ -4,7 +4,16 @@ import { formatDetailedDuration, formatDateTimeWithTime, formatIndonesianDate } 
 import { savePdfDataUrl, getPdfDataUrlSync, getPdfDataUrl, triggerPdfDownload, dataUrlToBlob } from '../services/pdfStore';
 import { saveGlobalPdf, deleteStoredGlobalPdf, resolvePatientEducationPdfs } from '../services/storage';
 import { renderPdfFirstPageToImage, generateFallbackPdfCover, generateSamplePdfDataUrl } from '../services/pdfRender';
+import { PdfViewerCanvas } from './PdfViewerCanvas';
+import { EducationPdfCard } from './EducationPdfCard';
 import { downloadEducationPdf } from '../utils/pdfDownload';
+import {
+  normalizeMilestones,
+  isMilestoneChecked,
+  toggleMilestone,
+  MILESTONE_CHECKLIST_DEFINITIONS,
+  BOLEH_PULANG_DEFINITION,
+} from '../utils/milestones';
 
 const EQUIPMENT_PRESETS: {
   name: string;
@@ -225,30 +234,41 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
     patient.immunizationDischarge?.dischargeSummaryNote || 'Kondisi bayi menunjukkan kemajuan pesat. Target berat badan pulang: 2000 gram.'
   );
 
+  // 1. PARSING PROGRESS LOGS SAAT FETCH / SAVE DENGAN FALLBACK AMAN
+  const progressLogs: DailyLog[] = Array.isArray(patient.progressLogs)
+    ? patient.progressLogs
+    : Array.isArray(patient.progress_logs)
+    ? patient.progress_logs
+    : Array.isArray(patient.dailyLogs)
+    ? patient.dailyLogs
+    : Array.isArray(patient.daily_logs)
+    ? patient.daily_logs
+    : [];
+
   // Form states for adding new log
-  const lastLog = patient.dailyLogs[0];
-  const logCount = patient.dailyLogs.length + 1;
+  const lastLog = progressLogs[0];
+  const logCount = progressLogs.length + 1;
   const isAterm = patient.gestationCategory === 'aterm';
 
   const [logDate, setLogDate] = useState(new Date().toISOString().split('T')[0]);
   const [periodLabel, setPeriodLabel] = useState(isAterm ? `Hari ke-${logCount}` : `Minggu ke-${logCount}`);
   const [logWeight, setLogWeight] = useState<number | string>(
-    lastLog ? lastLog.weightGram : patient.initialAnthropometry.weightGram
+    lastLog ? (lastLog.weightGram ?? (lastLog as any).weight ?? patient.initialAnthropometry.weightGram) : patient.initialAnthropometry.weightGram
   );
-  const [temp, setTemp] = useState<number | string>(lastLog?.vitalSigns.temperature || 36.7);
-  const [hr, setHr] = useState<number | string>(lastLog?.vitalSigns.heartRate || 138);
-  const [rr, setRr] = useState<number | string>(lastLog?.vitalSigns.respiratoryRate || 42);
-  const [spo2, setSpo2] = useState<number | string>(lastLog?.vitalSigns.spo2 || 98);
+  const [temp, setTemp] = useState<number | string>(lastLog?.vitalSigns?.temperature || (lastLog as any)?.temp || 36.7);
+  const [hr, setHr] = useState<number | string>(lastLog?.vitalSigns?.heartRate || (lastLog as any)?.hr || 138);
+  const [rr, setRr] = useState<number | string>(lastLog?.vitalSigns?.respiratoryRate || (lastLog as any)?.rr || 42);
+  const [spo2, setSpo2] = useState<number | string>(lastLog?.vitalSigns?.spo2 || 98);
 
-  const [drinkMethod, setDrinkMethod] = useState(lastLog?.drinkingAbility.method || 'OGT/Sonde');
-  const [drinkCc, setDrinkCc] = useState<number | string>(lastLog?.drinkingAbility.volumeCcPerFeeding || 15);
-  const [drinkFreq, setDrinkFreq] = useState<number | string>(lastLog?.drinkingAbility.frequencyPerDay || 8);
-  const [drinkNotes, setDrinkNotes] = useState(lastLog?.drinkingAbility.notes || 'Toleransi minum baik.');
+  const [drinkMethod, setDrinkMethod] = useState(lastLog?.drinkingAbility?.method || (lastLog as any)?.drinkMethod || 'OGT/Sonde');
+  const [drinkCc, setDrinkCc] = useState<number | string>(lastLog?.drinkingAbility?.volumeCcPerFeeding || (lastLog as any)?.drinkCc || 15);
+  const [drinkFreq, setDrinkFreq] = useState<number | string>(lastLog?.drinkingAbility?.frequencyPerDay || (lastLog as any)?.drinkFreq || 8);
+  const [drinkNotes, setDrinkNotes] = useState(lastLog?.drinkingAbility?.notes || (lastLog as any)?.drinkNotes || 'Toleransi minum baik.');
 
   const [logEquipment, setLogEquipment] = useState<MedicalEquipment[]>(
     lastLog?.activeEquipment ? [...lastLog.activeEquipment] : [...patient.currentEquipment]
   );
-  const [logMilestones, setLogMilestones] = useState<Milestones>({ ...patient.milestones });
+  const [logMilestones, setLogMilestones] = useState<string[]>(() => normalizeMilestones(patient.milestones));
   const [logMilestonesChips, setLogMilestonesChips] = useState<string[]>([
     'Toleransi ASI OGT baik (8x8 ml)',
     'Refleks hisap mulai tampak',
@@ -289,8 +309,11 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
 
   // Sync state when patient changes
   useEffect(() => {
-    setLogMilestones({ ...patient.milestones });
-    setLogEquipment(patient.dailyLogs[0]?.activeEquipment ? [...patient.dailyLogs[0].activeEquipment] : [...patient.currentEquipment]);
+    setLogMilestones(normalizeMilestones(patient.milestones));
+    const currentActiveEq = progressLogs[0]?.activeEquipment
+      ? [...progressLogs[0].activeEquipment]
+      : [...patient.currentEquipment];
+    setLogEquipment(currentActiveEq);
     if (patient.registeredEquipment && patient.registeredEquipment.length > 0) {
       setRegisteredEquipment(patient.registeredEquipment);
     }
@@ -576,20 +599,68 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
+    let updatedMilestones = normalizeMilestones(patient.milestones);
+    if (hb0Given) {
+      if (!updatedMilestones.includes('HB0 (Imunisasi Hepatitis B0)')) {
+        updatedMilestones.push('HB0 (Imunisasi Hepatitis B0)');
+      }
+    } else {
+      updatedMilestones = updatedMilestones.filter((m) => m !== 'HB0 (Imunisasi Hepatitis B0)' && m !== 'hb0');
+    }
+
+    if (shkStatus.includes('Sampel') || shkStatus.includes('Normal')) {
+      if (!updatedMilestones.includes('SHK (Skrining Hipotiroid Kongenital)')) {
+        updatedMilestones.push('SHK (Skrining Hipotiroid Kongenital)');
+      }
+    } else {
+      updatedMilestones = updatedMilestones.filter((m) => m !== 'SHK (Skrining Hipotiroid Kongenital)' && m !== 'shk');
+    }
+
+    if (pjbStatus.includes('PASS')) {
+      if (!updatedMilestones.includes('Skrining PJB (Penyakit Jantung Bawaan)')) {
+        updatedMilestones.push('Skrining PJB (Penyakit Jantung Bawaan)');
+      }
+    } else {
+      updatedMilestones = updatedMilestones.filter((m) => m !== 'Skrining PJB (Penyakit Jantung Bawaan)' && m !== 'skriningPJB');
+    }
+
     const updatedPatient: Patient = {
       ...patient,
       immunizationDischarge: updatedRec,
-      milestones: {
-        ...patient.milestones,
-        hb0: hb0Given,
-        shk: shkStatus.includes('Sampel') || shkStatus.includes('Normal'),
-        skriningPJB: pjbStatus.includes('PASS'),
-      },
+      milestones: updatedMilestones,
     };
 
     onUpdatePatient(updatedPatient);
     setSuccessBanner('✓ Catatan Imunisasi & Status Kepulangan Medis berhasil disimpan!');
     setTimeout(() => setSuccessBanner(null), 3500);
+  };
+
+  // Milestone Toggle Handler - Instant local state update & immediate patient persistence
+  const handleMilestoneToggle = (itemTitle: string, itemId?: string) => {
+    const current = normalizeMilestones(patient.milestones);
+    const isChecked = isMilestoneChecked(current, itemTitle, itemId);
+    const updatedMilestones = toggleMilestone(current, itemTitle, itemId, !isChecked);
+
+    // 1. Update form local state immediately
+    setLogMilestones(updatedMilestones);
+
+    // 2. Determine new status if SIAP & BOLEH PULANG is toggled
+    const isBolehPulang = isMilestoneChecked(updatedMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id);
+    let newStatus = patient.status;
+    if (isBolehPulang && patient.status !== 'Sudah Pulang') {
+      newStatus = 'Siap Pulang';
+    } else if (!isBolehPulang && patient.status === 'Siap Pulang') {
+      newStatus = 'Rawat NICU';
+    }
+
+    // 3. Update patient object immediately and sync to backend in background
+    const updatedPatient: Patient = {
+      ...patient,
+      milestones: updatedMilestones,
+      status: newStatus,
+    };
+
+    onUpdatePatient(updatedPatient);
   };
 
   // Open Edit Modal
@@ -614,13 +685,15 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
 
     const weightNum = Number(editLogWeight);
 
-    const updatedDailyLogs = patient.dailyLogs.map((item) => {
+    const updatedDailyLogs = progressLogs.map((item) => {
       if (item.id === editingLog.id) {
         return {
           ...item,
           date: editLogDate,
           periodLabel: editPeriodLabel,
+          label: editPeriodLabel,
           weightGram: weightNum,
+          weight: weightNum,
           vitalSigns: {
             temperature: Number(editTemp),
             heartRate: Number(editHr),
@@ -637,13 +710,16 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
     // Recalculate weight change grams relative to adjacent logs
     for (let i = 0; i < updatedDailyLogs.length; i++) {
       const nextLog = updatedDailyLogs[i + 1];
-      const prevWeight = nextLog ? nextLog.weightGram : patient.initialAnthropometry.weightGram;
-      updatedDailyLogs[i].weightChangeGram = updatedDailyLogs[i].weightGram - prevWeight;
+      const prevWeight = nextLog ? Number(nextLog.weightGram ?? (nextLog as any).weight ?? 0) : patient.initialAnthropometry.weightGram;
+      updatedDailyLogs[i].weightChangeGram = Number(updatedDailyLogs[i].weightGram ?? (updatedDailyLogs[i] as any).weight ?? 0) - prevWeight;
     }
 
     const updatedPatient: Patient = {
       ...patient,
       dailyLogs: updatedDailyLogs,
+      progressLogs: updatedDailyLogs,
+      progress_logs: updatedDailyLogs,
+      daily_logs: updatedDailyLogs,
     };
 
     onUpdatePatient(updatedPatient);
@@ -652,24 +728,25 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
     setTimeout(() => setSuccessBanner(null), 3500);
   };
 
-  // Delete Log
+  // Delete Log (Direct execution without window.confirm to avoid iframe sandbox errors)
   const handleDeleteLog = (logId: string) => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus catatan progres ini?')) {
-      const updatedDailyLogs = patient.dailyLogs.filter((l) => l.id !== logId);
-      for (let i = 0; i < updatedDailyLogs.length; i++) {
-        const nextLog = updatedDailyLogs[i + 1];
-        const prevWeight = nextLog ? nextLog.weightGram : patient.initialAnthropometry.weightGram;
-        updatedDailyLogs[i].weightChangeGram = updatedDailyLogs[i].weightGram - prevWeight;
-      }
-      const updatedPatient: Patient = {
-        ...patient,
-        dailyLogs: updatedDailyLogs,
-      };
-      onUpdatePatient(updatedPatient);
-      setEditingLog(null);
-      setSuccessBanner('✓ Catatan progres berhasil dihapus.');
-      setTimeout(() => setSuccessBanner(null), 3500);
+    const updatedDailyLogs = progressLogs.filter((l) => l.id !== logId);
+    for (let i = 0; i < updatedDailyLogs.length; i++) {
+      const nextLog = updatedDailyLogs[i + 1];
+      const prevWeight = nextLog ? Number(nextLog.weightGram ?? (nextLog as any).weight ?? 0) : patient.initialAnthropometry.weightGram;
+      updatedDailyLogs[i].weightChangeGram = Number(updatedDailyLogs[i].weightGram ?? (updatedDailyLogs[i] as any).weight ?? 0) - prevWeight;
     }
+    const updatedPatient: Patient = {
+      ...patient,
+      dailyLogs: updatedDailyLogs,
+      progressLogs: updatedDailyLogs,
+      progress_logs: updatedDailyLogs,
+      daily_logs: updatedDailyLogs,
+    };
+    onUpdatePatient(updatedPatient);
+    setEditingLog(null);
+    setSuccessBanner('✓ Catatan progres berhasil dihapus.');
+    setTimeout(() => setSuccessBanner(null), 3500);
   };
 
   // Handle Photo upload
@@ -699,17 +776,19 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
     e.preventDefault();
 
     const weightNum = Number(logWeight);
-    const prevWeight = lastLog ? lastLog.weightGram : patient.initialAnthropometry.weightGram;
+    const prevWeight = lastLog ? Number(lastLog.weightGram ?? (lastLog as any).weight ?? patient.initialAnthropometry.weightGram) : patient.initialAnthropometry.weightGram;
     const weightChangeGram = weightNum - prevWeight;
     const newLogId = 'log_' + Date.now();
 
     const finalPhotoUrl = logPhotoUrl || undefined;
 
-    const newLogItem = {
+    const newLogItem: DailyLog = {
       id: newLogId,
       date: logDate,
       periodLabel,
+      label: periodLabel,
       weightGram: weightNum,
+      weight: weightNum,
       weightChangeGram,
       vitalSigns: {
         temperature: Number(temp),
@@ -732,21 +811,26 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
       photoCaption: logPhotoCaption || undefined,
     };
 
-    const updatedLogs = [newLogItem, ...patient.dailyLogs];
+    // 2. PEMBARUAN STATE LOKAL INSTAN: Gabungkan log baru secara langsung
+    const updatedLogs = [newLogItem, ...progressLogs];
 
-    // Determine status based on milestones.bolehPulang
+    // Determine status based on milestones bolehPulang check
+    const isBolehPulang = isMilestoneChecked(logMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id);
     let newStatus = patient.status;
-    if (logMilestones.bolehPulang && patient.status !== 'Sudah Pulang') {
+    if (isBolehPulang && patient.status !== 'Sudah Pulang') {
       newStatus = 'Siap Pulang';
-    } else if (!logMilestones.bolehPulang && patient.status !== 'Sudah Pulang') {
+    } else if (!isBolehPulang && patient.status !== 'Sudah Pulang') {
       newStatus = 'Rawat NICU';
     }
 
     const updatedPatient: Patient = {
       ...patient,
       dailyLogs: updatedLogs,
+      progressLogs: updatedLogs,
+      progress_logs: updatedLogs,
+      daily_logs: updatedLogs,
       currentEquipment: [...logEquipment],
-      milestones: { ...logMilestones },
+      milestones: [...logMilestones],
       status: newStatus,
       coverPhotoUrl: logPhotoUrl || patient.coverPhotoUrl,
     };
@@ -765,21 +849,21 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
   const ageDuration = formatDetailedDuration(patient.birthDate);
   const stayDuration = formatDetailedDuration(patient.admissionDate);
 
-  const latestWeight = lastLog ? lastLog.weightGram : patient.initialAnthropometry.weightGram;
   const initialWeight = patient.initialAnthropometry.weightGram;
+  const latestWeight = lastLog ? Number(lastLog.weightGram ?? (lastLog as any).weight ?? initialWeight) : initialWeight;
   const weightGainTotal = latestWeight - initialWeight;
 
-  // Chart data
+  // 3. FORMAT DATA GRAFIK (Membaca log.weightGram maupun log.weight)
   const chartData = [
     {
       label: 'Saat Masuk',
       weight: initialWeight,
       date: formatIndonesianDate(patient.admissionDate),
     },
-    ...[...patient.dailyLogs].reverse().map((l) => ({
-      label: l.periodLabel,
-      weight: l.weightGram,
-      date: formatIndonesianDate(l.date),
+    ...[...progressLogs].reverse().map((l) => ({
+      label: l.periodLabel || (l as any).label || 'Log',
+      weight: Number(l.weightGram ?? (l as any).weight ?? 0),
+      date: formatIndonesianDate(l.date || l.createdAt),
     })),
   ];
 
@@ -990,7 +1074,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
             }`}
           >
             <TrendingUp className="w-4 h-4" />
-            <span>Data Perkembangan & Input Progres ({patient.dailyLogs.length})</span>
+            <span>Data Perkembangan & Input Progres ({progressLogs.length})</span>
           </button>
 
           <button
@@ -1285,36 +1369,25 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {Object.entries({
-                      lepasCPAP: 'Lepas CPAP',
-                      lepasVentilator: 'Lepas Ventilator',
-                      lepasInfus: 'Lepas Infus',
-                      lepasOGT: 'Lepas OGT / Sonde',
-                      lepasO2Nasal: 'Lepas O2 Nasal Kanul',
-                      refleksMenghisapBaik: 'Refleks Menghisap Baik',
-                      refleksMenelanBaik: 'Refleks Menelan Baik',
-                      selesaiPMK: 'Edukasi PMK (Perawatan Metode Kanguru)',
-                      selesaiHBO: 'Edukasi Mandi & Perawatan Tali Pusat',
-                      hb0: 'Imunisasi HB0 Selesai',
-                      shk: 'SHK (Skrining Hipotiroid Kongenital)',
-                      skriningPJB: 'Skrining PJB (Penyakit Jantung Bawaan)',
-                      bayiSementaraPemantauanKetat: 'Bayi Dalam Pemantauan Ketat',
-                    }).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2.5 p-2 bg-white rounded-xl border border-slate-200/80 cursor-pointer hover:bg-slate-100/80 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(logMilestones[key as keyof Milestones])}
-                          onChange={(e) =>
-                            setLogMilestones({
-                              ...logMilestones,
-                              [key]: e.target.checked,
-                            })
-                          }
-                          className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span className="font-semibold text-slate-800">{label}</span>
-                      </label>
-                    ))}
+                    {MILESTONE_CHECKLIST_DEFINITIONS.map((def) => {
+                      const isChecked = isMilestoneChecked(logMilestones, def.title, def.id);
+                      return (
+                        <label
+                          key={def.id}
+                          className="flex items-center gap-2.5 p-2 bg-white rounded-xl border border-slate-200/80 cursor-pointer hover:bg-slate-100/80 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleMilestoneToggle(def.title, def.id)}
+                            className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span className={`font-semibold ${def.isWarning ? 'text-amber-800' : 'text-slate-800'}`}>
+                            {def.title}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
 
                   {/* DEDICATED HIGHLIGHTED BOX FOR SIAP & BOLEH PULANG */}
@@ -1322,13 +1395,8 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                     <label className="flex items-start gap-3 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={Boolean(logMilestones.bolehPulang)}
-                        onChange={(e) =>
-                          setLogMilestones({
-                            ...logMilestones,
-                            bolehPulang: e.target.checked,
-                          })
-                        }
+                        checked={isMilestoneChecked(logMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id)}
+                        onChange={() => handleMilestoneToggle(BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id)}
                         className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-5 h-5 cursor-pointer accent-emerald-600 shrink-0"
                       />
                       <div>
@@ -1519,27 +1587,39 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                 </h3>
               </div>
 
-              {patient.dailyLogs.length === 0 ? (
+              {progressLogs.length === 0 ? (
                 <div className="p-6 text-center text-slate-400 text-xs font-medium">
                   Belum ada catatan progres harian/mingguan. Gunakan form di atas untuk menambah catatan progres.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {patient.dailyLogs.map((log) => {
+                  {progressLogs.map((log) => {
                     const milestoneChips = getLogMilestones(log);
+                    const logWeightVal = Number(log.weightGram ?? (log as any).weight ?? 0);
+                    const logPeriodLabel = log.periodLabel || (log as any).label || (log as any).dayLabel || 'Log Perkembangan';
+                    const logDateVal = log.date || (log as any).createdAt || '';
+                    const logNotes = log.nakesNotes || (log as any).notes || (log as any).note || '';
+                    const logAuthor = log.updatedBy || (log as any).author || 'Ns. Perawat NICU';
+                    const logVital = {
+                      heartRate: log.vitalSigns?.heartRate ?? (log as any).hr ?? (log as any).heartRate ?? 138,
+                      respiratoryRate: log.vitalSigns?.respiratoryRate ?? (log as any).rr ?? (log as any).respiratoryRate ?? 42,
+                      spo2: log.vitalSigns?.spo2 ?? (log as any).spo2 ?? 98,
+                      temperature: log.vitalSigns?.temperature ?? (log as any).temp ?? (log as any).temperature ?? 36.7,
+                    };
+
                     return (
                       <div
-                        key={log.id}
+                        key={log.id || String(Math.random())}
                         className="p-3.5 sm:p-4 bg-white rounded-2xl border border-slate-200/80 border-l-[4px] border-l-teal-600 shadow-2xs space-y-2.5 font-sans relative transition-all hover:shadow-xs"
                       >
                         {/* ROW 1: Period Label (Left) & Date + Edit (Top Right) */}
                         <div className="flex items-center justify-between">
                           <h4 className="text-teal-900 font-extrabold text-sm sm:text-base">
-                            {log.periodLabel}
+                            {logPeriodLabel}
                           </h4>
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] sm:text-xs font-mono text-slate-400 font-semibold">
-                              {log.date}
+                              {logDateVal}
                             </span>
                             <button
                               type="button"
@@ -1557,7 +1637,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                           <div>
                             Berat Badan:{' '}
                             <strong className="text-slate-900 font-extrabold">
-                              {log.weightGram} g ({(log.weightGram / 1000).toFixed(2)} kg)
+                              {logWeightVal} g ({(logWeightVal / 1000).toFixed(2)} kg)
                             </strong>
                           </div>
                           <span className="text-slate-300">•</span>
@@ -1582,16 +1662,16 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                         {/* ROW 3: Vital Signs Box */}
                         <div className="p-2 sm:px-4 bg-white border border-slate-200/80 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs font-medium text-slate-600">
                           <div>
-                            HR: <strong className="text-slate-900 font-bold">{log.vitalSigns.heartRate} bpm</strong>
+                            HR: <strong className="text-slate-900 font-bold">{logVital.heartRate} bpm</strong>
                           </div>
                           <div>
-                            RR: <strong className="text-slate-900 font-bold">{log.vitalSigns.respiratoryRate} x/m</strong>
+                            RR: <strong className="text-slate-900 font-bold">{logVital.respiratoryRate} x/m</strong>
                           </div>
                           <div>
-                            SpO2: <strong className="text-slate-900 font-bold">{log.vitalSigns.spo2}%</strong>
+                            SpO2: <strong className="text-slate-900 font-bold">{logVital.spo2}%</strong>
                           </div>
                           <div>
-                            Suhu: <strong className="text-slate-900 font-bold">{log.vitalSigns.temperature}°C</strong>
+                            Suhu: <strong className="text-slate-900 font-bold">{logVital.temperature}°C</strong>
                           </div>
                         </div>
 
@@ -1612,15 +1692,15 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                         </div>
 
                         {/* ROW 5: Nakes Notes in Quotes */}
-                        {log.nakesNotes && (
+                        {logNotes && (
                           <div className="text-xs text-slate-600 italic font-medium leading-relaxed">
-                            "{log.nakesNotes}"
+                            "{logNotes}"
                           </div>
                         )}
 
                         {/* ROW 6: Author at Bottom Right */}
                         <div className="text-right text-[11px] text-slate-400 font-medium italic">
-                          Dicatat oleh: {log.updatedBy}
+                          Dicatat oleh: {logAuthor}
                         </div>
                       </div>
                     );
@@ -1965,146 +2045,24 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
               </div>
             ) : pdfViewMode === 'grid' ? (
               /* GRID GALLERY VIEW (MATCHING IMAGE SCREENSHOT) */
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {filteredPdfs.map((pdf) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {filteredPdfs.map((pdf, index) => {
                   const coverImg =
                     pdfRenderedCovers[pdf.id] ||
                     pdf.coverImageUrl ||
                     generateFallbackPdfCover(pdf.title, pdf.category);
                   return (
-                    <div
+                    <EducationPdfCard
                       key={pdf.id}
-                      className={`bg-white rounded-3xl border-2 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col justify-between group relative ${
-                        pdf.isActive ? 'border-emerald-400/90' : 'border-slate-200 opacity-85'
-                      }`}
-                    >
-                      {/* Thumbnail Cover with NEW badge and hover overlay */}
-                      <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden flex items-center justify-center">
-                        <img
-                          src={coverImg}
-                          alt={pdf.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
-
-                        {/* Top Left Badge "NEW" */}
-                        <span className="absolute top-3 left-3 px-2.5 py-0.5 bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider rounded-full shadow-md z-10 flex items-center gap-1">
-                          NEW
-                        </span>
-
-                        {/* Top Right Status Badge */}
-                        <button
-                          type="button"
-                          onClick={() => togglePdfActive(pdf.id)}
-                          className={`absolute top-3 right-3 px-2.5 py-0.5 text-[10px] font-black rounded-full shadow-md z-10 transition-all cursor-pointer flex items-center gap-1 ${
-                            pdf.isActive
-                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                              : 'bg-slate-700/80 text-slate-200 hover:bg-slate-800'
-                          }`}
-                          title="Klik untuk ubah status tampil di Dashboard Orang Tua"
-                        >
-                          {pdf.isActive ? '✓ TAMPIL' : 'SEMBUNYI'}
-                        </button>
-
-                        {/* Hover Action Overlay */}
-                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 z-20">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewPdfItem(pdf)}
-                            className="w-10 h-10 bg-white hover:bg-teal-50 text-teal-800 rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                            title="Pratinjau Modul"
-                          >
-                            <Eye className="w-5 h-5 text-teal-700" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadPdf(pdf)}
-                            className="w-10 h-10 bg-teal-800 hover:bg-teal-900 text-white rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                            title="Unduh PDF"
-                          >
-                            <Download className="w-5 h-5 text-amber-300" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => promptDeletePdfItem(pdf.id, pdf.title)}
-                            className="w-10 h-10 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                            title="Hapus PDF"
-                          >
-                            <Trash2 className="w-4 h-4 text-white" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Card Content Below Thumbnail */}
-                      <div className="p-4 space-y-2.5 flex-1 flex flex-col justify-between bg-white">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="px-2.5 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 truncate max-w-[140px]">
-                              {pdf.category || 'Umum'}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-400">
-                              {pdf.publishedAt || '12 Agt 2026'}
-                            </span>
-                          </div>
-
-                          <h4 className="font-extrabold text-slate-900 text-sm line-clamp-2 leading-snug group-hover:text-teal-800 transition-colors">
-                            {pdf.title}
-                          </h4>
-
-                          <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between pt-0.5">
-                            <span className="flex items-center gap-1 text-slate-600 font-bold">
-                              <FileText className="w-3.5 h-3.5 text-slate-400" />
-                              <span>{pdf.pageCount || 1} Halaman</span>
-                            </span>
-                            <span className="text-slate-400 font-bold">{pdf.fileSizeText}</span>
-                          </div>
-
-                          {pdf.nakesNote && (
-                            <div className="p-2.5 bg-emerald-50/80 border border-emerald-100 rounded-2xl text-[11px] text-slate-700 italic font-medium max-h-24 overflow-y-auto scrollbar-thin scrollbar-thumb-emerald-300 select-text mt-1">
-                              "{pdf.nakesNote}"
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Action Buttons Row */}
-                        <div className="space-y-2 pt-2 border-t border-slate-100">
-                          {/* Toggle Active Switch */}
-                          <button
-                            type="button"
-                            onClick={() => togglePdfActive(pdf.id)}
-                            className={`w-full py-1.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs ${
-                              pdf.isActive
-                                ? 'bg-emerald-100/90 text-emerald-800 hover:bg-emerald-200'
-                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
-                          >
-                            <span className={`w-2 h-2 rounded-full ${pdf.isActive ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'}`}></span>
-                            <span>{pdf.isActive ? '✓ Tampil di Dashboard Ortu' : 'Sembunyi dari Ortu'}</span>
-                          </button>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setPreviewPdfItem(pdf)}
-                              className="py-1.5 px-2 bg-slate-50 hover:bg-teal-50 text-teal-800 border border-slate-200 font-extrabold text-xs rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5 text-teal-700" />
-                              <span>Pratinjau</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadPdf(pdf)}
-                              className="py-1.5 px-2 bg-teal-800 hover:bg-teal-900 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
-                            >
-                              <Download className="w-3.5 h-3.5 text-amber-300" />
-                              <span>Unduh</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                      pdf={pdf}
+                      coverImage={coverImg}
+                      positionNumber={index + 1}
+                      onOpenPreview={() => setPreviewPdfItem(pdf)}
+                      onDownload={() => handleDownloadPdf(pdf)}
+                      onToggleActive={() => togglePdfActive(pdf.id)}
+                      onDelete={() => promptDeletePdfItem(pdf.id, pdf.title)}
+                      isNakesAdmin={true}
+                    />
                   );
                 })}
               </div>
@@ -2279,23 +2237,14 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                       )}
                     </div>
 
-                    {/* Preview Image Container */}
-                    <div className="w-full bg-[#1e293b] rounded-3xl p-4 sm:p-6 flex items-center justify-center shadow-inner overflow-hidden min-h-[380px] border border-slate-800">
-                      {(() => {
-                        const displayImg =
-                          pdfRenderedCovers[previewPdfItem.id] ||
-                          previewPdfItem.coverImageUrl ||
-                          (previewPdfItem.fileDataUrl && previewPdfItem.fileDataUrl.startsWith('data:image') ? previewPdfItem.fileDataUrl : '') ||
-                          generateFallbackPdfCover(previewPdfItem.title, previewPdfItem.category);
-                        return (
-                          <img
-                            src={displayImg}
-                            alt={previewPdfItem.title}
-                            className="max-h-[560px] w-auto max-w-full object-contain rounded-2xl shadow-2xl transition-transform duration-300 hover:scale-[1.01] bg-white"
-                          />
-                        );
-                      })()}
-                    </div>
+                    {/* Native PDF / Google Drive Iframe Viewer */}
+                    <PdfViewerCanvas
+                      dataUrl={previewPdfItem.fileDataUrl || getPdfDataUrlSync(previewPdfItem.id)}
+                      title={previewPdfItem.title}
+                      fileName={previewPdfItem.fileName}
+                      nakesNote={previewPdfItem.nakesNote}
+                      onDownload={() => handleDownloadPdf(previewPdfItem)}
+                    />
                   </div>
 
                   {/* Footer */}

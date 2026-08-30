@@ -5,6 +5,8 @@ import { getPdfDataUrlSync, savePdfDataUrl } from '../services/pdfStore';
 import { saveGlobalPdf, resolvePatientEducationPdfs, setMemoryGlobalPdfs, syncGlobalPdfsFromBackend, getStoredGlobalPdfs } from '../services/storage';
 import { generateSamplePdfDataUrl, renderPdfFirstPageToImage, generateFallbackPdfCover } from '../services/pdfRender';
 import { getEducationApiStatus, EducationApiStatus } from '../services/api';
+import { EducationPdfCard } from './EducationPdfCard';
+import { PdfViewerCanvas } from './PdfViewerCanvas';
 import {
   ArrowLeft,
   BookOpen,
@@ -565,101 +567,17 @@ export const ParentEducationPage: React.FC<ParentEducationPageProps> = ({
           </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredPdfs.map((pdf) => {
+            {filteredPdfs.map((pdf, index) => {
               const coverImage = renderedCovers[pdf.id] || pdf.coverImageUrl || generateFallbackPdfCover(pdf.title, pdf.category);
-              const noteText = pdf.nakesNote || (pdf as any).nakesNotes;
               return (
-                <div
+                <EducationPdfCard
                   key={pdf.id}
-                  className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col justify-between group relative"
-                >
-                  {/* Image Section: Visual Thumbnail with Hover Overlay & Bright Green NEW Badge */}
-                  <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden flex items-center justify-center">
-                    <img
-                      src={coverImage}
-                      alt={pdf.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-
-                    {/* Top Left Badge "NEW" (Bright Green) */}
-                    <span className="absolute top-3 left-3 px-2.5 py-0.5 bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider rounded-full shadow-md z-10 flex items-center gap-1">
-                      NEW
-                    </span>
-
-                    {/* HOVER ACTION OVERLAY WITH 2 ROUND BUTTONS */}
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3.5 z-20">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewPdfModal(pdf)}
-                        className="w-11 h-11 bg-white hover:bg-teal-50 text-teal-800 rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                        title="Pratinjau Isi Materi (Modal)"
-                      >
-                        <Eye className="w-5 h-5 text-teal-700" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => downloadEducationPdf(pdf)}
-                        className="w-11 h-11 bg-teal-800 hover:bg-teal-900 text-white rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                        title="Unduh Berkas PDF Asli"
-                      >
-                        <Download className="w-5 h-5 text-amber-300" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card Content Below Thumbnail */}
-                  <div className="p-4 space-y-3 flex-1 flex flex-col justify-between bg-white">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="px-2.5 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 truncate max-w-[150px]">
-                          {pdf.category || 'Umum'}
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400">
-                          {pdf.publishedAt || (pdf as any).createdAt || '12 Agt 2026'}
-                        </span>
-                      </div>
-
-                      <h4 className="font-extrabold text-slate-900 text-sm line-clamp-2 leading-snug group-hover:text-teal-800 transition-colors">
-                        {pdf.title}
-                      </h4>
-
-                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between pt-0.5">
-                        <span className="flex items-center gap-1 text-slate-600 font-bold">
-                          <FileText className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{pdf.pageCount || 1} Halaman</span>
-                        </span>
-                        <span className="text-slate-400 font-bold">{pdf.fileSizeText || (pdf as any).fileSize || '1.2 MB'}</span>
-                      </div>
-
-                      {noteText && (
-                        <div className="p-2.5 bg-emerald-50/80 border border-emerald-100 rounded-2xl text-[11px] text-slate-700 italic font-medium max-h-24 overflow-y-auto scrollbar-thin scrollbar-thumb-emerald-300 select-text mt-1">
-                          "{noteText}"
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewPdfModal(pdf)}
-                        className="py-2 px-2.5 bg-slate-50 hover:bg-teal-50 text-teal-800 border border-slate-200 font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-teal-700" />
-                        <span>Pratinjau</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => downloadEducationPdf(pdf)}
-                        className="py-2 px-2.5 bg-teal-800 hover:bg-teal-900 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                      >
-                        <Download className="w-3.5 h-3.5 text-amber-300" />
-                        <span>Unduh PDF</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                  pdf={pdf}
+                  coverImage={coverImage}
+                  positionNumber={index + 1}
+                  onOpenPreview={() => setPreviewPdfModal(pdf)}
+                  onDownload={() => downloadEducationPdf(pdf)}
+                />
               );
             })}
           </div>
@@ -781,26 +699,14 @@ export const ParentEducationPage: React.FC<ParentEducationPageProps> = ({
               )}
             </div>
 
-            {/* Modal Main Body: High Resolution Large Visual Preview */}
-            <div className="p-5 sm:p-6 overflow-y-auto flex-1 bg-slate-900/95 flex items-center justify-center min-h-[400px]">
-              {(() => {
-                const displayImg =
-                  renderedCovers[previewPdfModal.id] ||
-                  previewPdfModal.coverImageUrl ||
-                  (previewPdfModal.fileDataUrl && previewPdfModal.fileDataUrl.startsWith('data:image') ? previewPdfModal.fileDataUrl : null) ||
-                  generateFallbackPdfCover(previewPdfModal.title, previewPdfModal.category || 'EDUKASI');
-
-                return (
-                  <div className="w-full flex justify-center items-center py-2">
-                    <img
-                      src={displayImg}
-                      alt={previewPdfModal.title}
-                      className="max-h-[580px] w-auto mx-auto object-contain rounded-2xl shadow-2xl border border-slate-700/50"
-                    />
-                  </div>
-                );
-              })()}
-            </div>
+            {/* Native PDF / Google Drive Iframe Viewer */}
+            <PdfViewerCanvas
+              dataUrl={previewPdfModal.fileDataUrl || getPdfDataUrlSync(previewPdfModal.id)}
+              title={previewPdfModal.title}
+              fileName={previewPdfModal.fileName}
+              nakesNote={previewPdfModal.nakesNote || (previewPdfModal as any).nakesNotes}
+              onDownload={() => downloadEducationPdf(previewPdfModal)}
+            />
 
             {/* Modal Footer */}
             <div className="px-6 py-4 bg-white border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">

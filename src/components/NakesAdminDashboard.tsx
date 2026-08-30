@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Patient,
   DailyLog,
@@ -15,6 +15,13 @@ import {
   formatIndonesianDate,
   formatShortDate,
 } from '../utils/dateUtils';
+import {
+  normalizeMilestones,
+  isMilestoneChecked,
+  toggleMilestone,
+  MILESTONE_CHECKLIST_DEFINITIONS,
+  BOLEH_PULANG_DEFINITION,
+} from '../utils/milestones';
 import {
   getShareableLink,
   getStoredPatients,
@@ -421,22 +428,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const [drinkFreq, setDrinkFreq] = useState(8);
   const [drinkNotes, setDrinkNotes] = useState('Toleransi minum baik.');
   const [logEquipment, setLogEquipment] = useState<MedicalEquipment[]>([]);
-  const [logMilestones, setLogMilestones] = useState<Milestones>({
-    lepasCPAP: false,
-    lepasVentilator: false,
-    lepasInfus: false,
-    lepasOGT: false,
-    lepasO2Nasal: false,
-    refleksMenghisapBaik: false,
-    refleksMenelanBaik: false,
-    bayiSementaraPemantauanKetat: false,
-    selesaiPMK: false,
-    selesaiHBO: false,
-    hb0: false,
-    shk: false,
-    skriningPJB: false,
-    bolehPulang: false,
-  });
+  const [logMilestones, setLogMilestones] = useState<string[]>([]);
   const [nakesNotes, setNakesNotes] = useState('');
   const [updatedBy, setUpdatedBy] = useState(
     currentNakesUser ? `${currentNakesUser.name} (${currentNakesUser.roleTitle})` : 'Ns. Perawat NICU'
@@ -454,16 +446,35 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     'O2 Mask',
   ];
 
+  // Helper to accurately determine if patient is soft-deleted
+  const isPatientDeleted = useCallback((p: Patient) => {
+    if (!p) return false;
+    return Boolean(
+      p.isDeleted === true ||
+      (p as any).is_deleted === 1 ||
+      (p as any).is_deleted === '1' ||
+      (p as any).is_deleted === true ||
+      p.status === 'deleted' ||
+      p.status === 'Deleted' ||
+      p.status === 'Disembunyikan'
+    );
+  }, []);
+
+  // Filter valid non-null patient records to prevent empty/blank rows
+  const validPatients = useMemo(() => {
+    return patients.filter((p) => p && typeof p === 'object' && p.id && (p.babyName || p.nickname));
+  }, [patients]);
+
   // Separate active vs soft-deleted patients
-  const activePatients = useMemo(() => patients.filter((p) => !p.isDeleted), [patients]);
-  const trashPatients = useMemo(() => patients.filter((p) => p.isDeleted), [patients]);
+  const activePatients = useMemo(() => validPatients.filter((p) => !isPatientDeleted(p)), [validPatients, isPatientDeleted]);
+  const trashPatients = useMemo(() => validPatients.filter((p) => isPatientDeleted(p)), [validPatients, isPatientDeleted]);
 
   // Overall Summary Stats for active patients + trash count
   const overallStats = useMemo(() => {
     const total = activePatients.length;
     const activeCare = activePatients.filter((p) => p.status !== 'Sudah Pulang').length;
-    const rawat = activePatients.filter((p) => p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !p.milestones?.bolehPulang).length;
-    const siapPulang = activePatients.filter((p) => p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || Boolean(p.milestones?.bolehPulang))).length;
+    const rawat = activePatients.filter((p) => p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')).length;
+    const siapPulang = activePatients.filter((p) => p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang'))).length;
     const alumni = activePatients.filter((p) => p.status === 'Sudah Pulang').length;
     const aterm = activePatients.filter((p) => p.gestationCategory === 'aterm').length;
     const preterm = activePatients.filter((p) => p.gestationCategory === 'preterm').length;
@@ -493,9 +504,9 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
         // Exclude Alumni (Sudah Pulang) from 'Semua' tab - Alumni has its own tab
         matchesStatus = p.status !== 'Sudah Pulang';
       } else if (statusFilter === 'rawat') {
-        matchesStatus = p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !p.milestones?.bolehPulang;
+        matchesStatus = p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang');
       } else if (statusFilter === 'siap_pulang') {
-        matchesStatus = p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || Boolean(p.milestones?.bolehPulang));
+        matchesStatus = p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang'));
       } else if (statusFilter === 'alumni') {
         matchesStatus = p.status === 'Sudah Pulang';
       } else if (statusFilter === 'trash') {
@@ -516,8 +527,8 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const filteredStats = useMemo(() => {
     return {
       total: filteredPatients.length,
-      rawat: filteredPatients.filter((p) => p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !p.milestones?.bolehPulang).length,
-      siapPulang: filteredPatients.filter((p) => p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || Boolean(p.milestones?.bolehPulang))).length,
+      rawat: filteredPatients.filter((p) => p.status !== 'Sudah Pulang' && p.status !== 'Siap Pulang' && !isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')).length,
+      siapPulang: filteredPatients.filter((p) => p.status !== 'Sudah Pulang' && (p.status === 'Siap Pulang' || isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang'))).length,
       alumni: filteredPatients.filter((p) => p.status === 'Sudah Pulang').length,
       aterm: filteredPatients.filter((p) => p.gestationCategory === 'aterm').length,
       preterm: filteredPatients.filter((p) => p.gestationCategory === 'preterm').length,
@@ -611,22 +622,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
         upperArmCircumferenceCm: Number(upperArmCircumferenceCm),
       },
       currentEquipment: selectedEquipment,
-      milestones: {
-        lepasCPAP: !selectedEquipment.includes('CPAP'),
-        lepasVentilator: !selectedEquipment.includes('Ventilator'),
-        lepasInfus: !selectedEquipment.includes('Infus'),
-        lepasOGT: !selectedEquipment.includes('OGT'),
-        lepasO2Nasal: !selectedEquipment.includes('Nasal Kanul'),
-        refleksMenghisapBaik: false,
-        refleksMenelanBaik: false,
-        bayiSementaraPemantauanKetat: false,
-        selesaiPMK: false,
-        selesaiHBO: false,
-        hb0: false,
-        shk: false,
-        skriningPJB: false,
-        bolehPulang: false,
-      },
+      milestones: [],
       status: 'Rawat NICU',
       nickname,
       accessPassword,
@@ -659,7 +655,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     setDrinkFreq(lastLog?.drinkingAbility.frequencyPerDay || 8);
     setDrinkNotes(lastLog?.drinkingAbility.notes || 'Toleransi minum baik.');
     setLogEquipment(lastLog?.activeEquipment ? [...lastLog.activeEquipment] : [...patient.currentEquipment]);
-    setLogMilestones({ ...patient.milestones });
+    setLogMilestones(normalizeMilestones(patient.milestones));
     setNakesNotes('Si kecil sehat dan dalam pemantauan rutin NICU RSUD Undata.');
     setUpdatedBy(
       currentNakesUser ? `${currentNakesUser.name} (${currentNakesUser.roleTitle})` : 'Ns. Perawat NICU'
@@ -725,10 +721,11 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
     if (freshPatient) {
       freshPatient.currentEquipment = logEquipment;
-      freshPatient.milestones = logMilestones;
-      if (logMilestones.bolehPulang && freshPatient.status !== 'Sudah Pulang') {
+      freshPatient.milestones = [...logMilestones];
+      const isBolehPulang = isMilestoneChecked(logMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id);
+      if (isBolehPulang && freshPatient.status !== 'Sudah Pulang') {
         freshPatient.status = 'Siap Pulang';
-      } else if (!logMilestones.bolehPulang && freshPatient.status !== 'Sudah Pulang') {
+      } else if (!isBolehPulang && freshPatient.status !== 'Sudah Pulang') {
         freshPatient.status = 'Rawat NICU';
       }
       if (logPhotoUrl && !freshPatient.coverPhotoUrl) {
@@ -846,17 +843,24 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     if (pat) {
       setPermanentDeletePatientTarget(pat);
     } else {
-      permanentlyDeletePatient(patientId);
-      onRefreshData();
+      permanentlyDeletePatient(patientId).then(() => {
+        onRefreshData();
+      });
     }
   };
 
-  const confirmPermanentDelete = () => {
+  const confirmPermanentDelete = async () => {
     if (!permanentDeletePatientTarget) return;
-    permanentlyDeletePatient(permanentDeletePatientTarget.id);
-    setSuccessBanner(`Data pasien ${permanentDeletePatientTarget.babyName} telah dihapus permanen.`);
-    setTimeout(() => setSuccessBanner(null), 4000);
+    const targetId = permanentDeletePatientTarget.id;
+    const targetName = permanentDeletePatientTarget.babyName;
+    
+    // Close modal & show feedback banner
     setPermanentDeletePatientTarget(null);
+    setSuccessBanner(`Data pasien ${targetName} telah dihapus permanen.`);
+    setTimeout(() => setSuccessBanner(null), 4000);
+
+    // Call permanent delete API
+    await permanentlyDeletePatient(targetId);
     onRefreshData();
   };
 
@@ -872,19 +876,17 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   };
 
   const handleClearAllPatients = () => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus SEMUA data pasien untuk persiapan demo? Data pasien yang ada saat ini akan dikosongkan.')) {
-      clearAllPatientsData();
-      onRefreshData();
-      setSuccessBanner('🧹 Semua data pasien telah berhasil dikosongkan. Sistem siap untuk demo dari awal!');
-      setTimeout(() => setSuccessBanner(null), 5000);
-    }
+    clearAllPatientsData();
+    onRefreshData();
+    setSuccessBanner('🧹 Semua data pasien telah berhasil dikosongkan. Sistem siap untuk demo dari awal!');
+    setTimeout(() => setSuccessBanner(null), 5000);
   };
 
-  const confirmEmptyTrash = () => {
-    emptyTrash();
+  const confirmEmptyTrash = async () => {
+    setIsEmptyTrashModalOpen(false);
     setSuccessBanner(`Semua data di Filter Hapus (${overallStats.trash} pasien) berhasil dibersihkan secara permanen.`);
     setTimeout(() => setSuccessBanner(null), 4000);
-    setIsEmptyTrashModalOpen(false);
+    await emptyTrash();
     onRefreshData();
   };
 
@@ -1637,7 +1639,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                               ? 'bg-rose-500 text-white'
                               : p.status === 'Sudah Pulang'
                               ? 'bg-pink-100/90 text-pink-700 border border-pink-200'
-                              : p.milestones.bolehPulang || p.status === 'Siap Pulang'
+                              : isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang') || p.status === 'Siap Pulang'
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                               : 'bg-teal-50 text-teal-800 border border-teal-200'
                           }`}>
@@ -1647,7 +1649,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                               <>
                                 <span className="text-pink-600 font-extrabold">✓</span> Alumni
                               </>
-                            ) : p.milestones.bolehPulang || p.status === 'Siap Pulang' ? (
+                            ) : isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang') || p.status === 'Siap Pulang' ? (
                               <>
                                 <span className="text-emerald-600 font-extrabold">✓</span> Siap Pulang
                               </>
@@ -2386,36 +2388,23 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {Object.entries({
-                    lepasCPAP: 'Lepas CPAP',
-                    lepasVentilator: 'Lepas Ventilator',
-                    lepasInfus: 'Lepas Infus',
-                    lepasOGT: 'Lepas OGT',
-                    lepasO2Nasal: 'Lepas O2 Nasal',
-                    refleksMenghisapBaik: 'Refleks Menghisap Baik',
-                    refleksMenelanBaik: 'Refleks Menelan Baik',
-                    selesaiPMK: 'Selesai Perawatan Metode Kanguru (PMK)',
-                    selesaiHBO: 'Selesai Fototerapi (HBO)',
-                    hb0: 'HB0 (Imunisasi Hepatitis B0)',
-                    shk: 'SHK (Skrining Hipotiroid Kongenital)',
-                    skriningPJB: 'Skrining PJB (Penyakit Jantung Bawaan)',
-                    bayiSementaraPemantauanKetat: 'Bayi Dalam Pemantauan Ketat',
-                  }).map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(logMilestones[key as keyof Milestones])}
-                        onChange={(e) =>
-                          setLogMilestones({
-                            ...logMilestones,
-                            [key]: e.target.checked,
-                          })
-                        }
-                        className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 cursor-pointer"
-                      />
-                      <span className="font-semibold text-slate-800">{label}</span>
-                    </label>
-                  ))}
+                  {MILESTONE_CHECKLIST_DEFINITIONS.map((def) => {
+                    const isChecked = isMilestoneChecked(logMilestones, def.title, def.id);
+                    return (
+                      <label key={def.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100/80 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const updated = toggleMilestone(logMilestones, def.title, def.id, e.target.checked);
+                            setLogMilestones(updated);
+                          }}
+                          className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 cursor-pointer"
+                        />
+                        <span className={`font-semibold ${def.isWarning ? 'text-amber-800' : 'text-slate-800'}`}>{def.title}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 {/* DEDICATED HIGHLIGHTED BOX FOR SIAP & BOLEH PULANG */}
@@ -2423,13 +2412,11 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={Boolean(logMilestones.bolehPulang)}
-                      onChange={(e) =>
-                        setLogMilestones({
-                          ...logMilestones,
-                          bolehPulang: e.target.checked,
-                        })
-                      }
+                      checked={isMilestoneChecked(logMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id)}
+                      onChange={(e) => {
+                        const updated = toggleMilestone(logMilestones, BOLEH_PULANG_DEFINITION.title, BOLEH_PULANG_DEFINITION.id, e.target.checked);
+                        setLogMilestones(updated);
+                      }}
                       className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-5 h-5 cursor-pointer accent-emerald-600 shrink-0"
                     />
                     <div>

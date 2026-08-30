@@ -19,10 +19,19 @@ import {
   renderPdfFirstPageToImage,
   generateSamplePdfDataUrl,
   generateFallbackPdfCover,
+  formatGoogleDriveEmbedUrl,
+  formatGoogleDriveImageUrl,
+  processCoverImageUrl,
+  processPdfDocumentUrl,
+  processEducationUrls,
+  isGoogleDriveUrl,
+  getPdfEmbedUrl,
+  getPdfDirectDownloadUrl,
 } from '../services/pdfRender';
 import { downloadEducationPdf } from '../utils/pdfDownload';
 import { PdfViewerCanvas } from './PdfViewerCanvas';
-import { getEducationApiStatus, EducationApiStatus } from '../services/api';
+import { EducationPdfCard } from './EducationPdfCard';
+import { getEducationApiStatus, EducationApiStatus, updateEducationPdfApi } from '../services/api';
 import {
   ArrowLeft,
   BookOpen,
@@ -55,6 +64,8 @@ import {
   ArrowLeftRight,
   Loader2,
   RefreshCw,
+  Link2,
+  Globe,
 } from 'lucide-react';
 
 interface GlobalEducationPageProps {
@@ -80,27 +91,20 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  // Form State for NEW PDF
+  // Form State for NEW PDF (100% URL-Based)
   const [pdfTitle, setPdfTitle] = useState('');
   const [pdfCategory, setPdfCategory] = useState('Bayi BBLR & Prematur');
-  const [pdfFileName, setPdfFileName] = useState('');
-  const [pdfFileSizeText, setPdfFileSizeText] = useState('1.2 MB');
-  const [pdfFileDataUrl, setPdfFileDataUrl] = useState('');
-  const [pdfCoverImageUrl, setPdfCoverImageUrl] = useState<string>('');
-  const [pdfPageCount, setPdfPageCount] = useState<number>(1);
-  const [pdfFileObj, setPdfFileObj] = useState<File | null>(null);
+  const [pdfDocUrl, setPdfDocUrl] = useState('');
+  const [pdfCoverUrl, setPdfCoverUrl] = useState('');
   const [pdfNakesNote, setPdfNakesNote] = useState('');
 
-  // EDIT PDF State & Form
+  // EDIT PDF State & Form (100% URL-Based)
   const [editingPdf, setEditingPdf] = useState<EducationPdfItem | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [editCategory, setEditCategory] = useState('Metode Kanguru (PMK)');
+  const [editCategory, setEditCategory] = useState('Bayi BBLR & Prematur');
+  const [editDocUrl, setEditDocUrl] = useState('');
+  const [editCoverUrl, setEditCoverUrl] = useState('');
   const [editNakesNote, setEditNakesNote] = useState('');
-  const [editFileName, setEditFileName] = useState('');
-  const [editFileSizeText, setEditFileSizeText] = useState('');
-  const [editFileDataUrl, setEditFileDataUrl] = useState('');
-  const [editCoverImageUrl, setEditCoverImageUrl] = useState('');
-  const [editFileObj, setEditFileObj] = useState<File | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Preview Modal
@@ -346,65 +350,6 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
     return matchCat && matchSearch;
   });
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPdfFileObj(file);
-      setPdfFileName(file.name);
-      const kb = Math.round(file.size / 1024);
-      setPdfFileSizeText(kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`);
-
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        if (evt.target?.result) {
-          const dataUrl = evt.target.result as string;
-          setPdfFileDataUrl(dataUrl);
-
-          try {
-            // Render Page 1 to Image via pdf.js canvas
-            const { coverUrl, numPages } = await renderPdfFirstPageToImage(dataUrl);
-            if (coverUrl) {
-              setPdfCoverImageUrl(coverUrl);
-            } else {
-              setPdfCoverImageUrl(generateFallbackPdfCover(pdfTitle || file.name, pdfCategory));
-            }
-            if (numPages) {
-              setPdfPageCount(numPages);
-            }
-          } catch (err) {
-            console.warn('PDF cover generation warning:', err);
-            setPdfCoverImageUrl(generateFallbackPdfCover(pdfTitle || file.name, pdfCategory));
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleEditFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setEditFileObj(file);
-      setEditFileName(file.name);
-      const kb = Math.round(file.size / 1024);
-      setEditFileSizeText(kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`);
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        if (evt.target?.result) {
-          const dataUrl = evt.target.result as string;
-          setEditFileDataUrl(dataUrl);
-          try {
-            const { coverUrl } = await renderPdfFirstPageToImage(dataUrl);
-            if (coverUrl && editingPdf) {
-              setRenderedCovers((prev) => ({ ...prev, [editingPdf.id]: coverUrl }));
-            }
-          } catch {}
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pdfTitle.trim()) {
@@ -412,8 +357,8 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
       return;
     }
 
-    if (!pdfFileObj && !pdfFileDataUrl && !pdfCoverImageUrl) {
-      alert('Harap unggah minimal 1 berkas (File PDF atau Gambar Sampul PNG/JPG).');
+    if (!pdfDocUrl.trim()) {
+      alert('URL Berkas / Link PDF (Google Drive atau Direct Link) wajib diisi.');
       return;
     }
 
@@ -421,26 +366,36 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
     const newPdfId = 'pdf_' + Date.now();
 
     try {
-      let uploadedFileUrl = pdfFileDataUrl || '';
-      let uploadedCoverUrl = pdfCoverImageUrl || generateFallbackPdfCover(pdfTitle.trim(), pdfCategory);
+      // Automatic Google Drive and Link URL Processing
+      const { finalPdfUrl, finalCoverUrl } = processEducationUrls(
+        pdfDocUrl.trim(),
+        pdfCoverUrl.trim()
+      );
 
-      // Cache in IndexedDB for fast local reading
-      if (uploadedFileUrl) {
-        savePdfDataUrl(newPdfId, uploadedFileUrl);
+      const resolvedCoverUrl =
+        finalCoverUrl || generateFallbackPdfCover(pdfTitle.trim(), pdfCategory);
+
+      // Cache locally
+      if (finalPdfUrl) {
+        savePdfDataUrl(newPdfId, finalPdfUrl);
       }
-      if (uploadedCoverUrl) {
-        savePdfDataUrl(`cover_${newPdfId}`, uploadedCoverUrl);
+      if (resolvedCoverUrl) {
+        savePdfDataUrl(`cover_${newPdfId}`, resolvedCoverUrl);
       }
+
+      const isDrive = isGoogleDriveUrl(pdfDocUrl.trim());
+      const fileName = `${pdfTitle.trim().replace(/\s+/g, '_')}.pdf`;
+      const fileSizeText = isDrive ? 'Google Drive' : 'Direct Link';
 
       const newPdf: EducationPdfItem = {
         id: newPdfId,
         title: pdfTitle.trim(),
         category: pdfCategory,
-        fileName: pdfFileName || `${pdfTitle.replace(/\s+/g, '_')}.pdf`,
-        fileSizeText: pdfFileSizeText || '1.2 MB',
-        fileDataUrl: uploadedFileUrl || undefined,
-        coverImageUrl: uploadedCoverUrl || undefined,
-        pageCount: pdfPageCount || 1,
+        fileName: fileName,
+        fileSizeText: fileSizeText,
+        fileDataUrl: finalPdfUrl,
+        coverImageUrl: resolvedCoverUrl,
+        pageCount: 1,
         nakesNote: pdfNakesNote.trim() || undefined,
         publishedAt: new Date().toLocaleDateString('id-ID', {
           day: 'numeric',
@@ -454,8 +409,8 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
       saveGlobalPdf(newPdf);
       setStoredPdfs((prev) => [newPdf, ...prev.filter((p) => p.id !== newPdfId)]);
 
-      if (uploadedCoverUrl) {
-        setRenderedCovers((prev) => ({ ...prev, [newPdfId]: uploadedCoverUrl }));
+      if (resolvedCoverUrl) {
+        setRenderedCovers((prev) => ({ ...prev, [newPdfId]: resolvedCoverUrl }));
       }
 
       // Auto attach to existing patient records
@@ -478,70 +433,26 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
 
       // Reset Form
       setPdfTitle('');
-      setPdfFileName('');
-      setPdfFileDataUrl('');
-      setPdfCoverImageUrl('');
-      setPdfPageCount(1);
-      setPdfFileObj(null);
+      setPdfDocUrl('');
+      setPdfCoverUrl('');
       setPdfNakesNote('');
     } catch (err: any) {
       console.error('Upload Education Error:', err);
-      alert('Error: ' + (err?.message || 'Terjadi kendala saat mengunggah modul edukasi.'));
+      alert('Error: ' + (err?.message || 'Terjadi kendala saat menyimpan modul edukasi.'));
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const kb = Math.round(file.size / 1024);
-      const sizeStr = kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        if (evt.target?.result) {
-          const imgDataUrl = evt.target.result as string;
-          setPdfCoverImageUrl(imgDataUrl);
-          if (!pdfFileDataUrl) {
-            setPdfFileDataUrl(imgDataUrl);
-            setPdfFileName(file.name);
-            setPdfFileSizeText(sizeStr);
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleEditCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        if (evt.target?.result) {
-          const coverUrl = evt.target.result as string;
-          setEditCoverImageUrl(coverUrl);
-          if (editingPdf) {
-            setRenderedCovers((prev) => ({ ...prev, [editingPdf.id]: coverUrl }));
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // OPEN EDIT MODAL
   const handleOpenEdit = (pdf: EducationPdfItem) => {
-    const existingDataUrl = pdf.fileDataUrl || getPdfDataUrlSync(pdf.id);
+    const existingDataUrl = pdf.fileDataUrl || getPdfDataUrlSync(pdf.id) || '';
     setEditingPdf(pdf);
     setEditTitle(pdf.title);
     setEditCategory(pdf.category);
+    setEditDocUrl(existingDataUrl);
+    setEditCoverUrl(pdf.coverImageUrl || '');
     setEditNakesNote(pdf.nakesNote || '');
-    setEditFileName(pdf.fileName);
-    setEditFileSizeText(pdf.fileSizeText);
-    setEditFileDataUrl(existingDataUrl || '');
-    setEditCoverImageUrl(pdf.coverImageUrl || '');
-    setEditFileObj(null);
   };
 
   // SAVE EDITED PDF
@@ -552,37 +463,51 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
       alert('Judul materi edukasi tidak boleh kosong.');
       return;
     }
+    if (!editDocUrl.trim()) {
+      alert('URL Berkas / Link PDF tidak boleh kosong.');
+      return;
+    }
 
     setIsSavingEdit(true);
 
     try {
-      const finalDataUrl = editFileDataUrl || editingPdf.fileDataUrl || getPdfDataUrlSync(editingPdf.id);
-      const finalCover = editCoverImageUrl || editingPdf.coverImageUrl || generateFallbackPdfCover(editTitle.trim(), editCategory);
+      const { finalPdfUrl, finalCoverUrl } = processEducationUrls(
+        editDocUrl.trim(),
+        editCoverUrl.trim()
+      );
 
-      if (finalDataUrl) {
-        savePdfDataUrl(editingPdf.id, finalDataUrl);
+      const resolvedCoverUrl =
+        finalCoverUrl || editingPdf.coverImageUrl || generateFallbackPdfCover(editTitle.trim(), editCategory);
+
+      if (finalPdfUrl) {
+        savePdfDataUrl(editingPdf.id, finalPdfUrl);
       }
-      if (finalCover) {
-        savePdfDataUrl(`cover_${editingPdf.id}`, finalCover);
+      if (resolvedCoverUrl) {
+        savePdfDataUrl(`cover_${editingPdf.id}`, resolvedCoverUrl);
       }
+
+      const isDrive = isGoogleDriveUrl(editDocUrl.trim());
+      const fileName = `${editTitle.trim().replace(/\s+/g, '_')}.pdf`;
+      const fileSizeText = isDrive ? 'Google Drive' : 'Direct Link';
 
       const updatedPdfItem: EducationPdfItem = {
         ...editingPdf,
         title: editTitle.trim(),
         category: editCategory,
         nakesNote: editNakesNote.trim() || undefined,
-        fileName: editFileName || editingPdf.fileName,
-        fileSizeText: editFileSizeText || editingPdf.fileSizeText,
-        fileDataUrl: finalDataUrl || undefined,
-        coverImageUrl: finalCover,
+        fileName: fileName,
+        fileSizeText: fileSizeText,
+        fileDataUrl: finalPdfUrl,
+        coverImageUrl: resolvedCoverUrl,
       };
 
-      // Save to MySQL & Memory
+      // Explicitly send PUT request to API and update local store
+      await updateEducationPdfApi(updatedPdfItem);
       saveGlobalPdf(updatedPdfItem);
       setStoredPdfs((prev) => prev.map((item) => (item.id === editingPdf.id ? updatedPdfItem : item)));
 
-      if (finalCover) {
-        setRenderedCovers((prev) => ({ ...prev, [editingPdf.id]: finalCover }));
+      if (resolvedCoverUrl) {
+        setRenderedCovers((prev) => ({ ...prev, [editingPdf.id]: resolvedCoverUrl }));
       }
 
       // Update across all patient records
@@ -605,46 +530,19 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
       });
 
       onSavePatients(updatedPatients);
+      const freshPdfs = await syncGlobalPdfsFromBackend();
+      if (freshPdfs && freshPdfs.length > 0) {
+        setStoredPdfs(freshPdfs);
+      }
       onRefreshData();
       setSuccessBanner(`✏️ Berhasil memperbarui data materi PDF "${updatedPdfItem.title}" di Database.`);
       setEditingPdf(null);
-      setEditFileObj(null);
     } catch (err: any) {
       console.error('Error updating PDF:', err);
       alert('Error: ' + (err?.message || 'Silakan coba lagi.'));
     } finally {
       setIsSavingEdit(false);
     }
-  };
-
-  // PROMPT TRASH ICON FOR NEW PDF FILE INPUT SECTION
-  const handlePromptDeleteNewFileInput = () => {
-    setDeleteModal({
-      isOpen: true,
-      title: 'Hapus File PDF Terpilih?',
-      description: 'Apakah Anda yakin ingin membatalkan/menghapus file PDF yang baru Anda pilih ini dari form input upload?',
-      fileName: pdfFileName || 'File PDF Terpilih',
-      onConfirm: () => {
-        setPdfFileName('');
-        setPdfFileDataUrl('');
-        setPdfFileSizeText('1.2 MB');
-      },
-    });
-  };
-
-  // PROMPT TRASH ICON FOR EDIT PDF FILE INPUT SECTION
-  const handlePromptDeleteEditFileInput = () => {
-    setDeleteModal({
-      isOpen: true,
-      title: 'Hapus File PDF Pilihan Baru?',
-      description: 'Apakah Anda yakin ingin membatalkan/menghapus pilihan file PDF baru ini dari form edit?',
-      fileName: editFileName || 'File PDF Terpilih',
-      onConfirm: () => {
-        setEditFileName('');
-        setEditFileDataUrl('');
-        setEditFileSizeText('');
-      },
-    });
   };
 
   // PROMPT TRASH ICON FOR UPLOADED RESULTS CARD
@@ -835,19 +733,19 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
         </div>
       )}
 
-      {/* FORM: INPUT / UPLOAD FILE PDF EDUKASI BARU */}
+      {/* FORM: INPUT URL MATERI EDUKASI (PDF & GAMBAR SAMPUL) */}
       <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-2xs space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-400/20 border border-amber-300 text-amber-950 flex items-center justify-center shrink-0">
-              <Upload className="w-5 h-5 stroke-[2.5] text-amber-800" />
+            <div className="w-10 h-10 rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 flex items-center justify-center shrink-0">
+              <Link2 className="w-5 h-5 stroke-[2.5] text-teal-700" />
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-black text-slate-900">
-                Input / Upload File PDF Edukasi Baru
+                Input URL Materi Edukasi (PDF &amp; Gambar Sampul)
               </h3>
               <p className="text-xs text-slate-500 font-normal">
-                Unggah file PDF materi edukasi di sini agar langsung otomatis tampil di folder edukasi semua orang tua pasien.
+                Gunakan URL link Google Drive atau direct link agar materi edukasi langsung tersimpan dan otomatis tampil utuh pada kartu pasien.
               </p>
             </div>
           </div>
@@ -857,7 +755,7 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
             onClick={() => setIsUploadFormOpen(!isUploadFormOpen)}
             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
           >
-            <span>{isUploadFormOpen ? 'Sembunyikan Form' : 'Buka Form Upload'}</span>
+            <span>{isUploadFormOpen ? 'Sembunyikan Form' : 'Buka Form URL'}</span>
           </button>
         </div>
 
@@ -871,7 +769,7 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="Contoh: Panduan PMK & Perawatan Rumah"
+                  placeholder="Contoh: Panduan PMK & Perawatan Bayi Prematur di Rumah"
                   value={pdfTitle}
                   onChange={(e) => setPdfTitle(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-500 outline-none"
@@ -897,62 +795,51 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Input 1: URL Berkas / Link PDF */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  a. Berkas Dokumen PDF <span className="text-slate-400 font-normal">(untuk diunduh pengguna)</span>
+                  URL Berkas / Link PDF (Google Drive / Direct URL) <span className="text-rose-500">*</span>
                 </label>
-                <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <label className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-2xs shrink-0 flex items-center gap-1.5">
-                    <Upload className="w-4 h-4 text-white" />
-                    <span>Pilih PDF</span>
-                    <input
-                      type="file"
-                      accept=".pdf,application/pdf"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-xs font-medium text-slate-600 italic truncate flex-1">
-                    {pdfFileDataUrl?.startsWith('data:application/pdf') ? pdfFileName : 'Pilih file PDF (.pdf)'}
-                  </span>
-                  {pdfFileDataUrl?.startsWith('data:application/pdf') && (
-                    <button
-                      type="button"
-                      onClick={handlePromptDeleteNewFileInput}
-                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                      title="Hapus / batalkan file PDF terpilih"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                <div className="relative">
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://drive.google.com/file/d/.../view atau https://domain.com/file.pdf"
+                    value={pdfDocUrl}
+                    onChange={(e) => setPdfDocUrl(e.target.value)}
+                    className="w-full p-2.5 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-500 outline-none font-mono"
+                  />
+                  <Globe className="w-4 h-4 text-teal-600 absolute left-2.5 top-3" />
                 </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  💡 Mendukung link Google Drive, Dropbox, atau direct link PDF.
+                </p>
               </div>
 
+              {/* Input 2: URL Gambar Sampul / Infografis */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  b. Gambar Sampul / Infografis <span className="text-slate-400 font-normal">(PNG / JPG untuk thumbnail & pratinjau)</span>
+                  URL Gambar Sampul / Infografis <span className="text-slate-400 font-normal">(Opsional)</span>
                 </label>
-                <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <label className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-2xs shrink-0 flex items-center gap-1.5">
-                    <Upload className="w-4 h-4 text-white" />
-                    <span>Pilih Gambar</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleCoverImageChange}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-xs font-medium text-slate-600 italic truncate flex-1">
-                    {pdfCoverImageUrl ? 'Gambar Sampul Terpilih' : 'Otomatis dibuat dari Halaman 1 PDF jika dikosongkan'}
-                  </span>
+                <div className="relative">
+                  <input
+                    type="url"
+                    placeholder="https://drive.google.com/file/d/.../view atau https://domain.com/poster.png"
+                    value={pdfCoverUrl}
+                    onChange={(e) => setPdfCoverUrl(e.target.value)}
+                    className="w-full p-2.5 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-500 outline-none font-mono"
+                  />
+                  <Link2 className="w-4 h-4 text-amber-500 absolute left-2.5 top-3" />
                 </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  🖼️ Link Google Drive gambar PNG/JPG atau direct image URL untuk tampilan poster penuh yang jernih.
+                </p>
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1">
-                Catatan Khusus Nakes untuk Orang Tua
+                Catatan Khusus Nakes untuk Orang Tua <span className="text-slate-400 font-normal">(Opsional)</span>
               </label>
               <textarea
                 rows={2}
@@ -971,7 +858,7 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
               {isUploading ? (
                 <>
                   <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
-                  <span>Mengunggah &amp; Menyimpan ke Database...</span>
+                  <span>Menyimpan ke Database...</span>
                 </>
               ) : (
                 <>
@@ -1127,168 +1014,32 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
                     onDragOver={(e) => handleDragOver(e, pdf.id)}
                     onDrop={(e) => handleDrop(e, pdf.id)}
                     onDragEnd={handleDragEnd}
-                    className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden flex flex-col justify-between group relative ${
+                    className={`transition-all duration-200 rounded-3xl ${
                       draggedPdfId === pdf.id
                         ? 'opacity-40 scale-95 border-dashed border-teal-500 shadow-none'
                         : dragOverPdfId === pdf.id
-                        ? 'ring-4 ring-teal-400 ring-offset-2 border-teal-500 scale-[1.02] shadow-xl'
-                        : 'border-slate-200/90 shadow-2xs hover:shadow-xl hover:-translate-y-1'
+                        ? 'ring-4 ring-teal-400 ring-offset-2 scale-[1.02] shadow-2xl'
+                        : ''
                     }`}
                   >
-                    {/* Top Reorder / Position Bar */}
-                    <div className="px-3 py-1.5 bg-slate-900 text-white flex items-center justify-between gap-1.5 select-none border-b border-slate-800">
-                      <div
-                        className="flex items-center gap-1 cursor-grab active:cursor-grabbing hover:text-amber-300 transition-colors"
-                        title="Tahan dan geser kartu ini (drag & drop) untuk memindahkan posisinya"
-                      >
-                        <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="px-1.5 py-0.5 bg-teal-800 text-amber-300 rounded text-[10px] font-black tracking-wider uppercase">
-                          Posisi #{globalIndex + 1}
-                        </span>
-                      </div>
-
-                      {/* Quick Move Left / Right Buttons */}
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          type="button"
-                          disabled={isFirst}
-                          onClick={() => handleMovePdf(pdf.id, 'left')}
-                          className={`p-1 rounded-md transition-all cursor-pointer flex items-center gap-0.5 text-[10px] font-bold ${
-                            isFirst
-                              ? 'text-slate-600 cursor-not-allowed opacity-30'
-                              : 'text-slate-300 hover:text-white hover:bg-slate-800 active:scale-90'
-                          }`}
-                          title="Geser 1 Posisi ke Kiri (Sebelumnya)"
-                        >
-                          <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isLast}
-                          onClick={() => handleMovePdf(pdf.id, 'right')}
-                          className={`p-1 rounded-md transition-all cursor-pointer flex items-center gap-0.5 text-[10px] font-bold ${
-                            isLast
-                              ? 'text-slate-600 cursor-not-allowed opacity-30'
-                              : 'text-slate-300 hover:text-white hover:bg-slate-800 active:scale-90'
-                          }`}
-                          title="Geser 1 Posisi ke Kanan (Berikutnya)"
-                        >
-                          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Image Section & Preview Cover */}
-                    <div className="relative aspect-[3/4] bg-slate-100 overflow-hidden flex items-center justify-center">
-                      <img
-                        src={coverImage}
-                        alt={pdf.title}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-
-                      {/* Top Left Badge "NEW" */}
-                      <span className="absolute top-2.5 left-2.5 px-2.5 py-1 bg-emerald-600/95 backdrop-blur-xs text-white text-[10px] font-black uppercase tracking-wider rounded-lg shadow-md flex items-center gap-1 z-10">
-                        <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
-                        <span>NEW</span>
-                      </span>
-
-                      {/* HOVER OVERLAY ACTION BUTTONS */}
-                      <div className="absolute inset-0 bg-slate-900/65 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 z-20">
-                        {/* ICON 1: MATA (Preview Large / Lightbox Pop-up) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPreviewPdf(pdf);
-                            setZoomScale(100);
-                          }}
-                          className="w-11 h-11 bg-white hover:bg-teal-50 text-teal-800 rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                          title="Pratinjau Besar (Preview Lightbox)"
-                        >
-                          <Eye className="w-5 h-5 text-teal-700" />
-                        </button>
-
-                        {/* ICON 2: UNDUH (Download Direct File) */}
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadPdf(pdf)}
-                          className="w-11 h-11 bg-teal-800 hover:bg-teal-900 text-white rounded-full flex items-center justify-center shadow-lg transform hover:scale-110 transition-all cursor-pointer"
-                          title="Unduh File PDF Asli"
-                        >
-                          <Download className="w-5 h-5 text-amber-300" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Card Content Below Image */}
-                    <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
-                      <div className="space-y-1.5">
-                        {/* Category Tag */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 truncate max-w-[140px]">
-                            {pdf.category}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-400">
-                            {pdf.publishedAt}
-                          </span>
-                        </div>
-
-                        {/* Title */}
-                        <h4 className="font-extrabold text-slate-900 text-sm line-clamp-2 leading-snug group-hover:text-teal-800 transition-colors">
-                          {pdf.title}
-                        </h4>
-
-                        {/* Details / Sub-info */}
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold pt-1">
-                          <span className="flex items-center gap-1 text-slate-600">
-                            <FileText className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{pdf.pageCount || 1} Halaman</span>
-                          </span>
-                          <span className="text-slate-400 font-bold">{pdf.fileSizeText}</span>
-                        </div>
-
-                        {/* Nakes Note */}
-                        {pdf.nakesNote && (
-                          <div className="p-2.5 bg-emerald-50/80 border border-emerald-100 rounded-xl text-[11px] text-slate-700 italic font-medium max-h-24 overflow-y-auto scrollbar-thin scrollbar-thumb-emerald-300 select-text">
-                            "{pdf.nakesNote}"
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Admin Edit, Download & Delete Actions */}
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(pdf)}
-                            className="px-2 py-1 text-amber-800 hover:bg-amber-50 font-bold text-[11px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                            title="Edit PDF"
-                          >
-                            <Pencil className="w-3 h-3 text-amber-700" />
-                            <span>Edit</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadPdf(pdf)}
-                            className="px-2.5 py-1 bg-teal-800 hover:bg-teal-900 text-white font-extrabold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
-                            title="Unduh File PDF Asli"
-                          >
-                            <Download className="w-3 h-3 text-amber-300" />
-                            <span>Unduh</span>
-                          </button>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteGlobalPdf(pdf.id, pdf.title)}
-                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Hapus PDF Edukasi"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
+                    <EducationPdfCard
+                      pdf={pdf}
+                      coverImage={coverImage}
+                      positionNumber={globalIndex + 1}
+                      onOpenPreview={() => {
+                        setPreviewPdf(pdf);
+                        setZoomScale(100);
+                      }}
+                      onDownload={() => handleDownloadPdf(pdf)}
+                      onEdit={() => handleOpenEdit(pdf)}
+                      onDelete={() => handleDeleteGlobalPdf(pdf.id, pdf.title)}
+                      showReorder={true}
+                      isFirst={isFirst}
+                      isLast={isLast}
+                      onMoveUp={() => handleMovePdf(pdf.id, 'left')}
+                      onMoveDown={() => handleMovePdf(pdf.id, 'right')}
+                      isNakesAdmin={true}
+                    />
                   </div>
                 );
               })}
@@ -1514,61 +1265,52 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Ganti File PDF (Opsional)
-                </label>
-                <div className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <label className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-lg cursor-pointer transition-all shrink-0 flex items-center gap-1.5">
-                    <Upload className="w-3.5 h-3.5 text-white" />
-                    <span>Pilih File Baru</span>
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      onChange={handleEditFileChange}
-                      className="hidden"
-                    />
+              <div className="space-y-4">
+                {/* Input 1: URL Berkas / Link PDF */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    URL Berkas / Link PDF (Google Drive / Direct URL) <span className="text-rose-500">*</span>
                   </label>
-                  <span className="text-xs font-medium text-slate-600 truncate flex-1">
-                    {editFileName || 'Tidak ada file baru dipilih'}
-                  </span>
-                  {editFileName && (
-                    <button
-                      type="button"
-                      onClick={handlePromptDeleteEditFileInput}
-                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                      title="Hapus / batalkan pilihan file PDF baru"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <div className="relative">
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://drive.google.com/file/d/.../view atau https://domain.com/file.pdf"
+                      value={editDocUrl}
+                      onChange={(e) => setEditDocUrl(e.target.value)}
+                      className="w-full p-2.5 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-500 outline-none font-mono"
+                    />
+                    <Globe className="w-4 h-4 text-teal-600 absolute left-2.5 top-3" />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    💡 Mendukung link Google Drive, Dropbox, atau direct link PDF.
+                  </p>
+                </div>
+
+                {/* Input 2: URL Gambar Sampul / Infografis */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    URL Gambar Sampul / Infografis <span className="text-slate-400 font-normal">(Opsional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="url"
+                      placeholder="https://drive.google.com/file/d/.../view atau https://domain.com/poster.png"
+                      value={editCoverUrl}
+                      onChange={(e) => setEditCoverUrl(e.target.value)}
+                      className="w-full p-2.5 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-500 outline-none font-mono"
+                    />
+                    <Link2 className="w-4 h-4 text-amber-500 absolute left-2.5 top-3" />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    🖼️ Link Google Drive gambar PNG/JPG atau direct image URL untuk tampilan cover poster jernih.
+                  </p>
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Ganti Gambar Sampul / Thumbnail (PNG / JPG) <span className="text-slate-400 font-normal">(Opsional)</span>
-                </label>
-                <div className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <label className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-lg cursor-pointer transition-all shrink-0 flex items-center gap-1.5">
-                    <Upload className="w-3.5 h-3.5 text-white" />
-                    <span>Pilih Gambar Sampul</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleEditCoverImageChange}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-xs font-medium text-slate-600 truncate flex-1">
-                    {editCoverImageUrl ? 'Gambar sampul kustom aktif' : 'Gunakan gambar bawaan'}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Catatan Khusus Nakes untuk Orang Tua
+                  Catatan Khusus Nakes untuk Orang Tua <span className="text-slate-400 font-normal">(Opsional)</span>
                 </label>
                 <textarea
                   rows={3}
@@ -1649,24 +1391,14 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
                 </div>
               </div>
 
-              {/* High Quality Crisp Image Preview Container (Zero Broken Icon / Iframe Errors) */}
-              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-slate-900/95 min-h-[360px] max-h-[560px] p-3 flex items-center justify-center relative shadow-inner">
-                {(() => {
-                  const displayImg =
-                    renderedCovers[previewPdf.id] ||
-                    previewPdf.coverImageUrl ||
-                    (previewPdf.fileDataUrl && previewPdf.fileDataUrl.startsWith('data:image') ? previewPdf.fileDataUrl : null) ||
-                    generateFallbackPdfCover(previewPdf.title, previewPdf.category);
-
-                  return (
-                    <img
-                      src={displayImg}
-                      alt={previewPdf.title}
-                      className="max-h-[500px] w-auto mx-auto object-contain rounded-xl shadow-lg border border-slate-700/50"
-                    />
-                  );
-                })()}
-              </div>
+              {/* Native PDF / Google Drive Iframe Viewer */}
+              <PdfViewerCanvas
+                dataUrl={previewPdf.fileDataUrl || getPdfDataUrlSync(previewPdf.id)}
+                title={previewPdf.title}
+                fileName={previewPdf.fileName}
+                nakesNote={previewPdf.nakesNote}
+                onDownload={() => handleDownloadPdf(previewPdf)}
+              />
             </div>
 
             {/* 3. MODAL FOOTER */}

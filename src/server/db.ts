@@ -10,22 +10,11 @@ let memoryPatients: Patient[] = [];
 let memoryNakesUsers: NakesUser[] = [
   {
     id: 'nakes-superadmin-01',
-    name: 'Admin Utama NICU',
-    roleTitle: 'Super Admin Ruangan',
-    accountType: 'Admin',
+    name: 'Super Admin NICU',
+    roleTitle: 'Super Administrator',
+    accountType: 'Super Admin',
     username: 'admin',
     pin: '123456',
-    createdAt: new Date().toISOString(),
-    hasAccessRights: true,
-    isSuperAdmin: true,
-  },
-  {
-    id: 'nakes-perawat-01',
-    name: 'Ns. Rizma El Fariani, S.Kep',
-    roleTitle: 'Perawat Primer NICU',
-    accountType: 'Admin',
-    username: 'rizma',
-    pin: '250297',
     createdAt: new Date().toISOString(),
     hasAccessRights: true,
     isSuperAdmin: true,
@@ -222,8 +211,7 @@ async function createTablesIfNotExist() {
     await pool.query(`
       INSERT INTO \`nakes_users\` (\`id\`, \`name\`, \`role_title\`, \`account_type\`, \`username\`, \`pin\`, \`has_access_rights\`, \`is_super_admin\`, \`created_at\`)
       VALUES 
-      ('nakes-superadmin-01', 'Admin Utama NICU', 'Super Admin Ruangan', 'Admin', 'admin', '123456', 1, 1, NOW()),
-      ('nakes-perawat-01', 'Ns. Rizma El Fariani, S.Kep', 'Perawat Primer NICU', 'Admin', 'rizma', '250297', 1, 1, NOW())
+      ('nakes_superadmin', 'Super Admin NICU', 'Super Administrator', 'Super Admin', 'superadmin', '1234', 1, 1, NOW())
       ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`);
     `);
 
@@ -285,16 +273,28 @@ function formatDateTimeForMySql(d?: string | Date | null): string | null {
   }
 }
 
-export async function getAllPatients(): Promise<Patient[]> {
+export async function getAllPatients(options?: { includeDeleted?: boolean; onlyDeleted?: boolean }): Promise<Patient[]> {
   if (!isConnected || !pool) {
-    return [...memoryPatients];
+    if (options?.onlyDeleted) {
+      return memoryPatients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
+    }
+    if (options?.includeDeleted) {
+      return [...memoryPatients];
+    }
+    return memoryPatients.filter((p) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
   }
 
   try {
+    let query = 'SELECT * FROM `patients` WHERE 1=1';
+    if (options?.onlyDeleted) {
+      query += " AND (`is_deleted` = 1 OR `status` = 'deleted' OR `status` = 'Disembunyikan')";
+    } else if (!options?.includeDeleted) {
+      query += " AND (`is_deleted` = 0 OR `is_deleted` IS NULL) AND `status` != 'deleted' AND `status` != 'Disembunyikan'";
+    }
+    query += ' ORDER BY `created_at` DESC';
+
     // 1. Fetch patients
-    const [patientRows] = await pool.query<any[]>(`
-      SELECT * FROM \`patients\` ORDER BY \`created_at\` DESC
-    `);
+    const [patientRows] = await pool.query<any[]>(query);
 
     // 2. Fetch all daily logs
     const [dailyLogRows] = await pool.query<any[]>(`
@@ -360,19 +360,14 @@ export async function getAllPatients(): Promise<Patient[]> {
         }),
         currentEquipment: parseJsonSafe(row.current_equipment, []),
         registeredEquipment: parseJsonSafe(row.registered_equipment, []),
-        milestones: parseJsonSafe(row.milestones, {
-          lepasCPAP: false,
-          lepasVentilator: false,
-          lepasInfus: false,
-          lepasOGT: false,
-          lepasO2Nasal: false,
-          refleksMenghisapBaik: false,
-          refleksMenelanBaik: false,
-          bayiSementaraPemantauanKetat: true,
-          selesaiPMK: false,
-          selesaiHBO: false,
-          bolehPulang: false,
-        }),
+        milestones: (() => {
+          const parsed = parseJsonSafe(row.milestones, []);
+          if (Array.isArray(parsed)) return parsed.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+          if (parsed && typeof parsed === 'object') {
+            return Object.entries(parsed).filter(([_, v]) => Boolean(v)).map(([k]) => k);
+          }
+          return [];
+        })(),
         immunizationDischarge: parseJsonSafe(row.immunization_discharge, undefined),
         dischargeSummary: parseJsonSafe(row.discharge_summary, undefined),
         dischargedAt: row.discharged_at ? new Date(row.discharged_at).toISOString() : undefined,
@@ -463,7 +458,13 @@ export async function upsertPatient(patient: Patient): Promise<Patient> {
       JSON.stringify(patient.initialAnthropometry || {}),
       JSON.stringify(patient.currentEquipment || []),
       JSON.stringify(patient.registeredEquipment || []),
-      JSON.stringify(patient.milestones || {}),
+      JSON.stringify(
+        Array.isArray(patient.milestones)
+          ? patient.milestones.filter((m) => typeof m === 'string' && m.trim().length > 0)
+          : patient.milestones && typeof patient.milestones === 'object'
+          ? Object.entries(patient.milestones).filter(([_, v]) => Boolean(v)).map(([k]) => k)
+          : []
+      ),
       patient.immunizationDischarge ? JSON.stringify(patient.immunizationDischarge) : null,
       patient.dischargeSummary ? JSON.stringify(patient.dischargeSummary) : null,
       formatDateTimeForMySql(patient.dischargedAt),
@@ -537,6 +538,7 @@ export async function deletePatientById(patientId: string, hardDelete = false): 
     if (idx >= 0) {
       memoryPatients[idx].isDeleted = true;
       memoryPatients[idx].deletedAt = new Date().toISOString();
+      memoryPatients[idx].status = 'deleted';
     }
   }
 
@@ -548,7 +550,7 @@ export async function deletePatientById(patientId: string, hardDelete = false): 
       await pool.query('DELETE FROM `patients` WHERE `id` = ?', [patientId]);
     } else {
       await pool.query(
-        'UPDATE `patients` SET `is_deleted` = 1, `deleted_at` = NOW() WHERE `id` = ?',
+        'UPDATE `patients` SET `is_deleted` = 1, `status` = \'deleted\', `deleted_at` = NOW(), `updated_at` = NOW() WHERE `id` = ?',
         [patientId]
       );
     }
@@ -564,13 +566,14 @@ export async function restorePatientById(patientId: string): Promise<boolean> {
   if (idx >= 0) {
     memoryPatients[idx].isDeleted = false;
     memoryPatients[idx].deletedAt = undefined;
+    memoryPatients[idx].status = 'Rawat NICU';
   }
 
   if (!isConnected || !pool) return true;
 
   try {
     await pool.query(
-      'UPDATE `patients` SET `is_deleted` = 0, `deleted_at` = NULL WHERE `id` = ?',
+      'UPDATE `patients` SET `is_deleted` = 0, `status` = \'Rawat NICU\', `deleted_at` = NULL, `updated_at` = NOW() WHERE `id` = ?',
       [patientId]
     );
     return true;

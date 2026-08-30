@@ -1,30 +1,29 @@
 <?php
-/**
- * Endpoint API: Nakes Login Logs
- * Path: /api/nakes_login_logs.php
- */
-
-error_reporting(E_ALL);
+ob_start();
+error_reporting(0);
 ini_set('display_errors', '0');
 
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+header("Access-Control-Allow-Origin: {$origin}");
+header('Access-Control-Allow-Credentials: true');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-Auth-Token');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     http_response_code(200);
-    exit;
+    exit(0);
 }
 
+header('Content-Type: application/json; charset=utf-8');
+
 try {
-    // Cari lokasi file database.php secara dinamis
     $possiblePaths = [
-        __DIR__ . '/../config/database.php',
         __DIR__ . '/config/database.php',
-        __DIR__ . '/database.php',
-        __DIR__ . '/../includes/database.php',
-        __DIR__ . '/../db.php'
+        __DIR__ . '/../config/database.php',
+        __DIR__ . '/database.php'
     ];
 
     $dbLoaded = false;
@@ -41,20 +40,22 @@ try {
     }
 
     // Ambil koneksi PDO
-    if (function_exists('getDbConnection')) {
-        $pdo = getDbConnection();
-    } elseif (class_exists('Database')) {
+    if (class_exists('Database')) {
         $pdo = Database::getConnection();
+    } elseif (function_exists('getDbConnection')) {
+        $pdo = getDbConnection();
     } else {
         throw new Exception("Fungsi koneksi Database tidak ditemukan.");
     }
 
     // 1. Cek kolom yang tersedia di tabel nakes_login_logs
     $existingColumns = [];
-    $stmt = $pdo->query("SHOW COLUMNS FROM `nakes_login_logs`");
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $existingColumns[] = $row['Field'];
-    }
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `nakes_login_logs`");
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $existingColumns[] = strtolower($row['Field']);
+        }
+    } catch (Throwable $e) {}
 
     // 2. Susun SELECT dinamis
     $selectFields = ['id'];
@@ -83,22 +84,29 @@ try {
     $stmt = $pdo->query($query);
     $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     echo json_encode([
         'status'    => 'success',
+        'success'   => true,
         'message'   => 'Daftar log login berhasil diambil.',
         'data'      => $logs,
         'timestamp' => date('c')
-    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
 
 } catch (Throwable $e) {
-    http_response_code(500);
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    http_response_code(200);
     echo json_encode([
-        'status'  => 'error',
-        'message' => 'Gagal memuat log login: ' . $e->getMessage(),
-        'data'    => [
-            'file' => basename($e->getFile()),
-            'line' => $e->getLine()
-        ],
+        'status'    => 'error',
+        'success'   => false,
+        'message'   => 'Gagal memuat log login: ' . $e->getMessage(),
+        'data'      => [],
         'timestamp' => date('c')
-    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
 }

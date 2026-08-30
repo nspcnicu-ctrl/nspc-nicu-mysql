@@ -76,7 +76,32 @@ $photoUrl     = isset($input['cover_photo_url']) ? $input['cover_photo_url'] : $
 $initialAnthropo = isset($input['initial_anthropometry']) ? json_encode($input['initial_anthropometry']) : $existing['initial_anthropometry'];
 $currentEquip    = isset($input['current_equipment']) ? json_encode($input['current_equipment']) : $existing['current_equipment'];
 $registeredEquip = isset($input['registered_equipment']) ? json_encode($input['registered_equipment']) : $existing['registered_equipment'];
-$milestones      = isset($input['milestones']) ? json_encode($input['milestones']) : $existing['milestones'];
+$milestones = $existing['milestones'];
+if (isset($input['milestones'])) {
+    $rawMil = $input['milestones'];
+    if (is_string($rawMil) && trim($rawMil) !== '') {
+        $decoded = json_decode($rawMil, true);
+        if (json_last_error() === JSON_ERROR_NONE) $rawMil = $decoded;
+    }
+    $cleanMil = [];
+    if (is_array($rawMil)) {
+        $isAssoc = array_keys($rawMil) !== range(0, count($rawMil) - 1);
+        if ($isAssoc) {
+            foreach ($rawMil as $k => $v) {
+                if ($v === true || $v === 1 || $v === '1' || $v === 'true') {
+                    $cleanMil[] = (string)$k;
+                }
+            }
+        } else {
+            foreach ($rawMil as $m) {
+                if (is_string($m) && trim($m) !== '') {
+                    $cleanMil[] = trim($m);
+                }
+            }
+        }
+    }
+    $milestones = json_encode(array_values(array_unique($cleanMil)), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+}
 $immunization    = isset($input['immunization_discharge']) ? json_encode($input['immunization_discharge']) : $existing['immunization_discharge'];
 $dischargeSum    = isset($input['discharge_summary']) ? json_encode($input['discharge_summary']) : $existing['discharge_summary'];
 $dischargedAt    = isset($input['discharged_at']) ? $input['discharged_at'] : $existing['discharged_at'];

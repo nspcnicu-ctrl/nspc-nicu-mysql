@@ -150,6 +150,5 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 INSERT INTO `nakes_users` (`id`, `name`, `role_title`, `account_type`, `username`, `pin`, `has_access_rights`, `is_super_admin`, `created_at`)
 VALUES 
-('nakes-superadmin-01', 'Admin Utama NICU', 'Super Admin Ruangan', 'Admin', 'admin', '123456', 1, 1, NOW()),
-('nakes-perawat-01', 'Ns. Rizma El Fariani, S.Kep', 'Perawat Primer NICU', 'Admin', 'rizma', '250297', 1, 1, NOW())
+('nakes_superadmin', 'Super Admin NICU', 'Super Administrator', 'Super Admin', 'superadmin', '1234', 1, 1, NOW())
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);

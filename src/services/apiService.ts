@@ -33,6 +33,76 @@ function safeJsonParse<T>(val: any, fallback: T): T {
  * Helper to transform PHP MySQL snake_case row to TypeScript Patient object (camelCase)
  */
 export function mapRowToPatient(row: any): Patient {
+  // Safely extract logs from all possible keys
+  const rawLogs =
+    row.progress_logs !== undefined
+      ? safeJsonParse(row.progress_logs, [])
+      : row.progressLogs !== undefined
+      ? safeJsonParse(row.progressLogs, [])
+      : row.daily_logs !== undefined
+      ? safeJsonParse(row.daily_logs, [])
+      : row.dailyLogs !== undefined
+      ? safeJsonParse(row.dailyLogs, [])
+      : [];
+
+  const rawLogsArray = Array.isArray(rawLogs) ? rawLogs : [];
+  const isAterm = (row.gestation_category || row.gestationCategory) === 'aterm';
+
+  const normalizedLogs: DailyLog[] = rawLogsArray.map((l: any, idx: number) => {
+    if (!l || typeof l !== 'object') {
+      return {
+        id: `log_${idx}_${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        periodLabel: isAterm ? `Hari ke-${idx + 1}` : `Minggu ke-${idx + 1}`,
+        weightGram: 2000,
+        vitalSigns: { temperature: 36.7, heartRate: 140, respiratoryRate: 42, spo2: 98 },
+        drinkingAbility: { method: 'OGT/Sonde', volumeCcPerFeeding: 15, frequencyPerDay: 8, notes: 'Toleransi minum baik.' },
+        activeEquipment: [],
+        nakesNotes: '',
+        updatedBy: 'Tenaga Kesehatan NICU',
+        createdAt: new Date().toISOString(),
+      };
+    }
+
+    const weightVal = Number(l.weightGram ?? l.weight ?? l.weight_gram ?? 0);
+    const dateVal = l.date || l.logDate || l.log_date || l.createdAt || l.created_at || new Date().toISOString().split('T')[0];
+    const periodLabelVal = l.periodLabel || l.period_label || l.label || l.dayLabel || (isAterm ? `Hari ke-${idx + 1}` : `Minggu ke-${idx + 1}`);
+
+    const vs = l.vitalSigns || l.vital_signs || {};
+    const vitalSigns = {
+      temperature: Number(vs.temperature ?? l.temp ?? l.temperature ?? 36.7),
+      heartRate: Number(vs.heartRate ?? vs.heart_rate ?? l.hr ?? l.heartRate ?? 138),
+      respiratoryRate: Number(vs.respiratoryRate ?? vs.respiratory_rate ?? l.rr ?? l.respiratoryRate ?? 42),
+      spo2: Number(vs.spo2 ?? l.spo2 ?? 98),
+    };
+
+    const da = l.drinkingAbility || l.drinking_ability || {};
+    const drinkingAbility = {
+      method: (da.method || l.drinkMethod || l.drink_method || 'OGT/Sonde') as any,
+      volumeCcPerFeeding: Number(da.volumeCcPerFeeding ?? da.volume_cc_per_feeding ?? l.drinkCc ?? l.volumeCc ?? 15),
+      frequencyPerDay: Number(da.frequencyPerDay ?? da.frequency_per_day ?? l.drinkFreq ?? l.frequencyPerDay ?? 8),
+      notes: da.notes || da.note || l.drinkNotes || l.drink_notes || 'Toleransi minum baik.',
+    };
+
+    return {
+      id: String(l.id || `log_${idx}_${Date.now()}`),
+      date: dateVal,
+      periodLabel: periodLabelVal,
+      weightGram: weightVal,
+      weight: weightVal,
+      weightChangeGram: l.weightChangeGram !== undefined ? Number(l.weightChangeGram) : (l.weight_change_gram !== undefined ? Number(l.weight_change_gram) : undefined),
+      vitalSigns,
+      drinkingAbility,
+      activeEquipment: Array.isArray(l.activeEquipment) ? l.activeEquipment : (Array.isArray(l.active_equipment) ? l.active_equipment : (Array.isArray(l.equipment) ? l.equipment : [])),
+      milestonesList: Array.isArray(l.milestonesList) ? l.milestonesList : (Array.isArray(l.milestones_list) ? l.milestones_list : (Array.isArray(l.milestonesChips) ? l.milestonesChips : undefined)),
+      nakesNotes: l.nakesNotes || l.nakes_notes || l.notes || l.note || '',
+      updatedBy: l.updatedBy || l.updated_by || 'Tenaga Kesehatan NICU',
+      createdAt: l.createdAt || l.created_at || dateVal,
+      photoUrl: l.photoUrl || l.photo_url || l.photo || undefined,
+      photoCaption: l.photoCaption || l.photo_caption || undefined,
+    } as DailyLog;
+  });
+
   return {
     id: String(row.id || `p_${Date.now()}`),
     nickname: row.nickname || '',
@@ -73,7 +143,10 @@ export function mapRowToPatient(row: any): Patient {
     immunizationDischarge: safeJsonParse(row.immunization_discharge || row.immunizationDischarge, undefined),
     dischargeSummary: safeJsonParse(row.discharge_summary || row.dischargeSummary, undefined),
     dischargedAt: row.discharged_at || row.dischargedAt || undefined,
-    dailyLogs: safeJsonParse(row.daily_logs || row.dailyLogs, []),
+    dailyLogs: normalizedLogs,
+    progressLogs: normalizedLogs,
+    progress_logs: normalizedLogs,
+    daily_logs: normalizedLogs,
     isDeleted: Boolean(row.is_deleted || row.isDeleted),
     deletedAt: row.deleted_at || row.deletedAt || undefined,
     isActive: row.is_active !== undefined ? Boolean(row.is_active) : true,
@@ -132,6 +205,14 @@ export async function getPatients(): Promise<Patient[]> {
  * Simpan / Edit Pasien (POST /patients.php with action: 'save')
  */
 export async function savePatient(patient: Patient): Promise<Patient> {
+  const logs = Array.isArray(patient.dailyLogs)
+    ? patient.dailyLogs
+    : Array.isArray(patient.progressLogs)
+    ? patient.progressLogs
+    : Array.isArray(patient.progress_logs)
+    ? patient.progress_logs
+    : [];
+
   const payload = {
     action: 'save',
     id: patient.id,
@@ -157,6 +238,10 @@ export async function savePatient(patient: Patient): Promise<Patient> {
     immunization_discharge: patient.immunizationDischarge || null,
     discharge_summary: patient.dischargeSummary || null,
     discharged_at: patient.dischargedAt || null,
+    daily_logs: logs,
+    dailyLogs: logs,
+    progress_logs: logs,
+    progressLogs: logs,
     is_deleted: patient.isDeleted ? 1 : 0,
     deleted_at: patient.deletedAt || null,
     ...patient,
@@ -346,25 +431,34 @@ export async function getEducationPdfs(): Promise<EducationPdfItem[]> {
     const items = (res.data as any)?.items || res.data || [];
     return Array.isArray(items) ? items : [];
   } catch (err) {
-    console.warn('[apiService] getEducationPdfs fallback:', err);
-    try {
-      const fallbackRes = await apiRequest<EducationPdfItem[]>('get_education.php', { method: 'GET' });
-      const fallbackItems = (fallbackRes.data as any)?.items || fallbackRes.data || [];
-      return Array.isArray(fallbackItems) ? fallbackItems : [];
-    } catch {
-      return [];
-    }
+    console.warn('[apiService] getEducationPdfs failed, falling back to empty/local:', err);
+    return [];
   }
 }
 
 export async function saveEducationPdf(pdf: EducationPdfItem): Promise<EducationPdfItem> {
-  const payload = { action: 'save', ...pdf };
+  const payload = {
+    action: 'save',
+    id: pdf.id,
+    title: pdf.title,
+    category: pdf.category,
+    file_name: pdf.fileName,
+    file_size_text: pdf.fileSizeText,
+    file_data_url: pdf.fileDataUrl,
+    file_url: pdf.fileDataUrl,
+    cover_image_url: pdf.coverImageUrl,
+    thumbnail_url: pdf.coverImageUrl,
+    nakes_note: pdf.nakesNote,
+    page_count: pdf.pageCount,
+    published_at: pdf.publishedAt,
+    order_index: pdf.orderIndex,
+  };
   try {
     const res = await apiRequest('education_pdfs.php', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    return (res.data as any)?.data || res.data || pdf;
+    return (res.data as any)?.data || (res.data as any)?.item || res.data || pdf;
   } catch {
     try {
       const res = await apiRequest('upload_education.php', {
@@ -378,22 +472,55 @@ export async function saveEducationPdf(pdf: EducationPdfItem): Promise<Education
   }
 }
 
+export async function updateEducationPdf(pdf: EducationPdfItem): Promise<EducationPdfItem> {
+  const payload = {
+    id: pdf.id,
+    title: pdf.title,
+    category: pdf.category,
+    file_name: pdf.fileName,
+    file_size_text: pdf.fileSizeText,
+    file_data_url: pdf.fileDataUrl,
+    file_url: pdf.fileDataUrl,
+    cover_image_url: pdf.coverImageUrl,
+    thumbnail_url: pdf.coverImageUrl,
+    nakes_note: pdf.nakesNote,
+    order_index: pdf.orderIndex,
+  };
+  try {
+    const res = await apiRequest(`education_pdfs.php?id=${encodeURIComponent(pdf.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return (res.data as any)?.data || (res.data as any)?.item || res.data || pdf;
+  } catch {
+    return saveEducationPdf(pdf);
+  }
+}
+
 export async function deleteEducationPdf(pdfId: string): Promise<boolean> {
   try {
-    await apiRequest('education_pdfs.php', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete', id: pdfId }),
+    await apiRequest(`education_pdfs.php?id=${encodeURIComponent(pdfId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ id: pdfId }),
     });
     return true;
   } catch {
     try {
-      await apiRequest('delete_education.php', {
+      await apiRequest('education_pdfs.php', {
         method: 'POST',
         body: JSON.stringify({ action: 'delete', id: pdfId }),
       });
       return true;
     } catch {
-      return false;
+      try {
+        await apiRequest('delete_education.php', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'delete', id: pdfId }),
+        });
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 }
@@ -401,11 +528,19 @@ export async function deleteEducationPdf(pdfId: string): Promise<boolean> {
 export async function reorderEducationPdfs(pdfs: EducationPdfItem[]): Promise<boolean> {
   try {
     await apiRequest('education_pdfs.php', {
-      method: 'POST',
+      method: 'PUT',
       body: JSON.stringify({ action: 'reorder', pdfs }),
     });
     return true;
   } catch {
-    return false;
+    try {
+      await apiRequest('education_pdfs.php', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'reorder', pdfs }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

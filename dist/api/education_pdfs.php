@@ -126,21 +126,16 @@ if ($method === 'GET') {
 }
 
 // -----------------------------------------------------------------------------
-// 2. POST METHOD (Tambah Data Baru / Edit / Delete / Reorder)
+// 2. POST METHOD (Tambah Data Baru / Fallback Delete & Reorder)
 // -----------------------------------------------------------------------------
 if ($method === 'POST') {
-    $rawInput = file_get_contents('php://input');
-    $inputData = json_decode($rawInput, true);
-    if (!is_array($inputData)) {
-        $inputData = !empty($_POST) ? $_POST : [];
-    }
+    $input = getPdfJsonInput();
+    $action = strtolower(trim((string)($input['action'] ?? 'save')));
 
-    $action = strtolower(trim((string)($inputData['action'] ?? $_GET['action'] ?? '')));
-    $id = trim((string)($inputData['id'] ?? $inputData['pdf_id'] ?? $_GET['id'] ?? ''));
-
-    // A. AKSI HAPUS (DELETE VIA POST)
+    // Fallback: POST Delete Action
     if ($action === 'delete') {
-        if (empty($id)) {
+        $pdfId = trim((string)($input['id'] ?? $input['pdf_id'] ?? $_GET['id'] ?? ''));
+        if (empty($pdfId)) {
             while (ob_get_level() > 0) {
                 ob_end_clean();
             }
@@ -156,8 +151,9 @@ if ($method === 'POST') {
         }
 
         try {
+            // Soft delete or delete
             $stmt = $pdo->prepare("UPDATE education_pdfs SET is_active = 0, updated_at = NOW() WHERE id = :id");
-            $stmt->execute([':id' => $pdfId ?? $id]);
+            $stmt->execute([':id' => $pdfId]);
 
             while (ob_get_level() > 0) {
                 ob_end_clean();
@@ -166,7 +162,7 @@ if ($method === 'POST') {
                 'status'    => 'success',
                 'success'   => true,
                 'message'   => 'Modul edukasi berhasil dihapus.',
-                'data'      => ['id' => $id],
+                'data'      => ['id' => $pdfId],
                 'timestamp' => date('c')
             ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
             exit;
@@ -185,9 +181,9 @@ if ($method === 'POST') {
         }
     }
 
-    // B. AKSI REORDER URUTAN
+    // Fallback: POST Reorder Action
     if ($action === 'reorder') {
-        $pdfs = $inputData['pdfs'] ?? [];
+        $pdfs = $input['pdfs'] ?? [];
         if (!is_array($pdfs) || empty($pdfs)) {
             while (ob_get_level() > 0) {
                 ob_end_clean();
@@ -206,9 +202,9 @@ if ($method === 'POST') {
         try {
             $stmt = $pdo->prepare("UPDATE education_pdfs SET order_index = :oindex, updated_at = NOW() WHERE id = :id");
             foreach ($pdfs as $idx => $item) {
-                $itemPdfId = trim((string)($item['id'] ?? ''));
-                if (!empty($itemPdfId)) {
-                    $stmt->execute([':oindex' => intval($idx), ':id' => $itemPdfId]);
+                $id = trim((string)($item['id'] ?? ''));
+                if (!empty($id)) {
+                    $stmt->execute([':oindex' => intval($idx), ':id' => $id]);
                 }
             }
             while (ob_get_level() > 0) {
@@ -237,116 +233,25 @@ if ($method === 'POST') {
         }
     }
 
-    // C. JIKA AKSI EDIT / UPDATE (action === 'update' atau ID ada & action bukan 'create')
-    if ($action === 'update' || (!empty($id) && $action !== 'create')) {
-        if (empty($id)) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-            http_response_code(400);
-            echo json_encode([
-                'status'  => 'error',
-                'success' => false,
-                'message' => 'ID wajib diisi untuk update'
-            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-            exit;
-        }
-
-        $title = trim((string)($inputData['title'] ?? ''));
-        $category = trim((string)($inputData['category'] ?? 'Bayi BBLR & Prematur'));
-        $fileDataUrl = trim((string)($inputData['file_data_url'] ?? $inputData['fileDataUrl'] ?? $inputData['file_url'] ?? $inputData['fileUrl'] ?? ''));
-        $coverImageUrl = trim((string)($inputData['cover_image_url'] ?? $inputData['coverImageUrl'] ?? $inputData['thumbnail_url'] ?? $inputData['thumbnailUrl'] ?? ''));
-        $nakesNote = trim((string)($inputData['nakes_note'] ?? $inputData['nakesNote'] ?? ''));
-        $fileName = trim((string)($inputData['file_name'] ?? $inputData['fileName'] ?? ($title ? ($title . '.pdf') : 'dokumen.pdf')));
-        $fileSizeText = trim((string)($inputData['file_size_text'] ?? $inputData['fileSizeText'] ?? 'Direct Link'));
-
-        try {
-            $sql = "UPDATE education_pdfs SET 
-                        title = :title,
-                        category = :category,
-                        file_name = :file_name,
-                        file_size_text = :file_size_text,
-                        file_data_url = :file_data_url,
-                        cover_image_url = :cover_image_url,
-                        nakes_note = :nakes_note,
-                        updated_at = NOW()
-                    WHERE id = :id";
-
-            $stmt = $pdo->prepare($sql);
-            $success = $stmt->execute([
-                ':title'           => $title,
-                ':category'        => $category,
-                ':file_name'       => $fileName,
-                ':file_size_text'  => $fileSizeText,
-                ':file_data_url'   => $fileDataUrl,
-                ':cover_image_url' => !empty($coverImageUrl) ? $coverImageUrl : null,
-                ':nakes_note'      => $nakesNote,
-                ':id'              => $id
-            ]);
-
-            $updatedItem = [
-                'id'              => $id,
-                'title'           => $title,
-                'category'        => $category,
-                'file_name'       => $fileName,
-                'fileName'        => $fileName,
-                'file_size_text'  => $fileSizeText,
-                'fileSizeText'    => $fileSizeText,
-                'file_data_url'   => $fileDataUrl,
-                'fileDataUrl'     => $fileDataUrl,
-                'cover_image_url' => !empty($coverImageUrl) ? $coverImageUrl : null,
-                'coverImageUrl'   => !empty($coverImageUrl) ? $coverImageUrl : null,
-                'nakes_note'      => $nakesNote,
-                'nakesNote'       => $nakesNote,
-            ];
-
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-            echo json_encode([
-                'status'    => $success ? 'success' : 'error',
-                'success'   => $success,
-                'message'   => $success ? 'Data berhasil diupdate' : 'Gagal update database',
-                'data'      => $updatedItem,
-                'item'      => $updatedItem,
-                'timestamp' => date('c')
-            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-            exit;
-        } catch (Throwable $e) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-            http_response_code(500);
-            echo json_encode([
-                'status'    => 'error',
-                'success'   => false,
-                'message'   => 'Gagal update database: ' . $e->getMessage(),
-                'data'      => null,
-                'timestamp' => date('c')
-            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-            exit;
-        }
-    }
-
-    // D. JIKA AKSI TAMBAH BARU (CREATE)
-    $newId = trim((string)($inputData['id'] ?? $inputData['pdf_id'] ?? ('pdf_' . time() . '_' . rand(100, 999))));
-    $title = trim((string)($inputData['title'] ?? ''));
-    $category = trim((string)($inputData['category'] ?? 'Bayi BBLR & Prematur'));
-    $patientId = trim((string)($inputData['patient_id'] ?? $inputData['patientId'] ?? ''));
-    $fileName = trim((string)($inputData['file_name'] ?? $inputData['fileName'] ?? ''));
-    $fileSizeText = trim((string)($inputData['file_size_text'] ?? $inputData['fileSizeText'] ?? 'Direct Link'));
-    $fileDataUrl = trim((string)($inputData['file_data_url'] ?? $inputData['fileDataUrl'] ?? $inputData['file_url'] ?? $inputData['fileUrl'] ?? ''));
-    $coverImageUrl = trim((string)($inputData['cover_image_url'] ?? $inputData['coverImageUrl'] ?? $inputData['thumbnail_url'] ?? $inputData['thumbnailUrl'] ?? ''));
+    // Tambah Data Baru (INSERT INTO education_pdfs)
+    $id = trim((string)($input['id'] ?? $input['pdf_id'] ?? ('pdf_' . time() . '_' . rand(100, 999))));
+    $title = trim((string)($input['title'] ?? ''));
+    $category = trim((string)($input['category'] ?? 'Bayi BBLR & Prematur'));
+    $patientId = trim((string)($input['patient_id'] ?? $input['patientId'] ?? ''));
+    $fileName = trim((string)($input['file_name'] ?? $input['fileName'] ?? ''));
+    $fileSizeText = trim((string)($input['file_size_text'] ?? $input['fileSizeText'] ?? 'Direct Link'));
+    $fileDataUrl = trim((string)($input['file_data_url'] ?? $input['fileDataUrl'] ?? $input['file_url'] ?? $input['fileUrl'] ?? ''));
+    $coverImageUrl = trim((string)($input['cover_image_url'] ?? $input['coverImageUrl'] ?? $input['thumbnail_url'] ?? $input['thumbnailUrl'] ?? ''));
     if (empty($coverImageUrl)) {
         $coverImageUrl = null;
     }
     if (empty($fileName)) {
         $fileName = !empty($title) ? ($title . '.pdf') : 'dokumen.pdf';
     }
-    $pageCount = intval($inputData['page_count'] ?? $inputData['pageCount'] ?? 1);
-    $nakesNote = trim((string)($inputData['nakes_note'] ?? $inputData['nakesNote'] ?? ''));
-    $publishedAt = trim((string)($inputData['published_at'] ?? $inputData['publishedAt'] ?? date('Y-m-d')));
-    $isActive = (isset($inputData['is_active']) && ($inputData['is_active'] === 0 || $inputData['is_active'] === '0' || $inputData['is_active'] === false)) ? 0 : 1;
+    $pageCount = intval($input['page_count'] ?? $input['pageCount'] ?? 1);
+    $nakesNote = trim((string)($input['nakes_note'] ?? $input['nakesNote'] ?? ''));
+    $publishedAt = trim((string)($input['published_at'] ?? $input['publishedAt'] ?? date('Y-m-d')));
+    $isActive = (isset($input['is_active']) && ($input['is_active'] === 0 || $input['is_active'] === '0' || $input['is_active'] === false)) ? 0 : 1;
 
     if (empty($title) || empty($fileDataUrl)) {
         while (ob_get_level() > 0) {
@@ -364,8 +269,9 @@ if ($method === 'POST') {
     }
 
     try {
-        if (isset($inputData['order_index']) || isset($inputData['orderIndex'])) {
-            $orderIndex = intval($inputData['order_index'] ?? $inputData['orderIndex']);
+        // Hitung order_index otomatis (posisi paling akhir/paling bawah) jika tidak disediakan
+        if (isset($input['order_index']) || isset($input['orderIndex'])) {
+            $orderIndex = intval($input['order_index'] ?? $input['orderIndex']);
         } else {
             $orderStmt = $pdo->query("SELECT COALESCE(MAX(order_index), -1) + 1 AS next_order FROM education_pdfs WHERE is_active = 1");
             $orderRow = $orderStmt->fetch(PDO::FETCH_ASSOC);
@@ -398,7 +304,7 @@ if ($method === 'POST') {
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
-            ':id'       => $newId,
+            ':id'       => $id,
             ':pid'      => !empty($patientId) ? $patientId : null,
             ':title'    => $title,
             ':category' => $category,
@@ -414,7 +320,7 @@ if ($method === 'POST') {
         ]);
 
         $createdItem = [
-            'id'            => $newId,
+            'id'            => $id,
             'patient_id'    => !empty($patientId) ? $patientId : null,
             'patientId'     => !empty($patientId) ? $patientId : null,
             'title'         => $title,
@@ -470,9 +376,8 @@ if ($method === 'POST') {
 // 3. PUT METHOD (Edit Konten / Update Posisi & Urutan)
 // -----------------------------------------------------------------------------
 if ($method === 'PUT') {
-    $inputData = getPdfJsonInput();
-
-    $id = trim((string)($inputData['id'] ?? $inputData['pdf_id'] ?? $_GET['id'] ?? ''));
+    $input = getPdfJsonInput();
+    $id = trim((string)($input['id'] ?? $input['pdf_id'] ?? $_GET['id'] ?? ''));
 
     if (empty($id)) {
         while (ob_get_level() > 0) {
@@ -482,7 +387,7 @@ if ($method === 'PUT') {
         echo json_encode([
             'status'    => 'error',
             'success'   => false,
-            'message'   => 'ID wajib diisi',
+            'message'   => 'ID Modul Edukasi wajib disertakan untuk pembaruan (PUT).',
             'data'      => null,
             'timestamp' => date('c')
         ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -491,8 +396,8 @@ if ($method === 'PUT') {
 
     try {
         // Cek apakah request khusus untuk update order_index
-        if (isset($inputData['order_index']) || isset($inputData['orderIndex']) || ($inputData['action'] ?? '') === 'reorder_single') {
-            $newOrder = intval($inputData['order_index'] ?? $inputData['orderIndex'] ?? 0);
+        if (isset($input['order_index']) || isset($input['orderIndex']) || ($input['action'] ?? '') === 'reorder_single') {
+            $newOrder = intval($input['order_index'] ?? $input['orderIndex'] ?? 0);
             $stmt = $pdo->prepare("UPDATE education_pdfs SET order_index = :oindex, updated_at = NOW() WHERE id = :id");
             $stmt->execute([':oindex' => $newOrder, ':id' => $id]);
 
@@ -509,52 +414,96 @@ if ($method === 'PUT') {
             exit;
         }
 
-        $title = trim((string)($inputData['title'] ?? ''));
-        $category = trim((string)($inputData['category'] ?? 'Bayi BBLR & Prematur'));
-        $fileDataUrl = trim((string)($inputData['file_data_url'] ?? $inputData['fileDataUrl'] ?? $inputData['file_url'] ?? $inputData['fileUrl'] ?? ''));
-        $coverImageUrl = trim((string)($inputData['cover_image_url'] ?? $inputData['coverImageUrl'] ?? $inputData['thumbnail_url'] ?? $inputData['thumbnailUrl'] ?? ''));
-        $nakesNote = trim((string)($inputData['nakes_note'] ?? $inputData['nakesNote'] ?? ''));
-        $fileName = trim((string)($inputData['file_name'] ?? $inputData['fileName'] ?? ($title ? ($title . '.pdf') : 'dokumen.pdf')));
-        $fileSizeText = trim((string)($inputData['file_size_text'] ?? $inputData['fileSizeText'] ?? 'Direct Link'));
+        // Ambil data eksisting
+        $checkStmt = $pdo->prepare("SELECT * FROM education_pdfs WHERE id = :id");
+        $checkStmt->execute([':id' => $id]);
+        $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
 
-        // Kueri UPDATE
-        $sql = "UPDATE education_pdfs SET 
-                    title = :title,
-                    category = :category,
-                    file_name = :file_name,
-                    file_size_text = :file_size_text,
-                    file_data_url = :file_data_url,
-                    cover_image_url = :cover_image_url,
-                    nakes_note = :nakes_note,
+        if (!$existing) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            http_response_code(404);
+            echo json_encode([
+                'status'    => 'error',
+                'success'   => false,
+                'message'   => "Modul edukasi dengan ID '{$id}' tidak ditemukan.",
+                'data'      => null,
+                'timestamp' => date('c')
+            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            exit;
+        }
+
+        // Ambil field baru atau gunakan nilai lama
+        $title = isset($input['title']) ? trim((string)$input['title']) : $existing['title'];
+        $category = isset($input['category']) ? trim((string)$input['category']) : $existing['category'];
+        $fileDataUrl = isset($input['file_data_url']) || isset($input['fileDataUrl']) || isset($input['file_url'])
+            ? trim((string)($input['file_data_url'] ?? $input['fileDataUrl'] ?? $input['file_url']))
+            : $existing['file_data_url'];
+        
+        $coverImageUrl = isset($input['cover_image_url']) || isset($input['coverImageUrl']) || isset($input['thumbnail_url'])
+            ? trim((string)($input['cover_image_url'] ?? $input['coverImageUrl'] ?? $input['thumbnail_url']))
+            : $existing['cover_image_url'];
+        
+        $nakesNote = isset($input['nakes_note']) || isset($input['nakesNote'])
+            ? trim((string)($input['nakes_note'] ?? $input['nakesNote']))
+            : $existing['nakes_note'];
+
+        $fileName = isset($input['file_name']) || isset($input['fileName'])
+            ? trim((string)($input['file_name'] ?? $input['fileName']))
+            : ($title ? ($title . '.pdf') : $existing['file_name']);
+
+        $fileSizeText = isset($input['file_size_text']) || isset($input['fileSizeText'])
+            ? trim((string)($input['file_size_text'] ?? $input['fileSizeText']))
+            : $existing['file_size_text'];
+
+        $sql = "UPDATE education_pdfs 
+                SET title = :title,
+                    category = :cat,
+                    file_name = :fname,
+                    file_size_text = :fsize,
+                    file_data_url = :fdata,
+                    cover_image_url = :cover,
+                    nakes_note = :note,
                     updated_at = NOW()
                 WHERE id = :id";
 
         $stmt = $pdo->prepare($sql);
-        $result = $stmt->execute([
-            ':title'           => $title,
-            ':category'        => $category,
-            ':file_name'       => $fileName,
-            ':file_size_text'  => $fileSizeText,
-            ':file_data_url'   => $fileDataUrl,
-            ':cover_image_url' => !empty($coverImageUrl) ? $coverImageUrl : null,
-            ':nakes_note'      => $nakesNote,
-            ':id'              => $id
+        $stmt->execute([
+            ':title' => $title,
+            ':cat'   => $category,
+            ':fname' => $fileName,
+            ':fsize' => $fileSizeText,
+            ':fdata' => $fileDataUrl,
+            ':cover' => !empty($coverImageUrl) ? $coverImageUrl : null,
+            ':note'  => $nakesNote,
+            ':id'    => $id
         ]);
 
         $updatedItem = [
-            'id'              => $id,
-            'title'           => $title,
-            'category'        => $category,
-            'file_name'       => $fileName,
-            'fileName'        => $fileName,
-            'file_size_text'  => $fileSizeText,
-            'fileSizeText'    => $fileSizeText,
-            'file_data_url'   => $fileDataUrl,
-            'fileDataUrl'     => $fileDataUrl,
+            'id'            => $id,
+            'patient_id'    => $existing['patient_id'],
+            'patientId'     => $existing['patient_id'],
+            'title'         => $title,
+            'category'      => $category,
+            'file_name'     => $fileName,
+            'fileName'      => $fileName,
+            'file_size_text'=> $fileSizeText,
+            'fileSizeText'  => $fileSizeText,
+            'file_data_url' => $fileDataUrl,
+            'fileDataUrl'   => $fileDataUrl,
             'cover_image_url' => !empty($coverImageUrl) ? $coverImageUrl : null,
-            'coverImageUrl'   => !empty($coverImageUrl) ? $coverImageUrl : null,
-            'nakes_note'      => $nakesNote,
-            'nakesNote'       => $nakesNote,
+            'coverImageUrl' => !empty($coverImageUrl) ? $coverImageUrl : null,
+            'page_count'    => intval($existing['page_count'] ?? 1),
+            'pageCount'     => intval($existing['page_count'] ?? 1),
+            'nakes_note'    => $nakesNote,
+            'nakesNote'     => $nakesNote,
+            'published_at'  => $existing['published_at'],
+            'publishedAt'   => $existing['published_at'],
+            'is_active'     => (bool)$existing['is_active'],
+            'isActive'      => (bool)$existing['is_active'],
+            'order_index'   => intval($existing['order_index'] ?? 0),
+            'orderIndex'    => intval($existing['order_index'] ?? 0),
         ];
 
         while (ob_get_level() > 0) {
@@ -563,7 +512,7 @@ if ($method === 'PUT') {
         echo json_encode([
             'status'    => 'success',
             'success'   => true,
-            'message'   => 'Data berhasil diperbarui',
+            'message'   => 'Data modul edukasi berhasil diperbarui.',
             'data'      => $updatedItem,
             'item'      => $updatedItem,
             'timestamp' => date('c')
@@ -573,7 +522,6 @@ if ($method === 'PUT') {
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
-        http_response_code(500);
         echo json_encode([
             'status'    => 'error',
             'success'   => false,

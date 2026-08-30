@@ -22,6 +22,7 @@ import {
   recordNakesLoginApi,
   fetchEducationPdfsApi,
   saveEducationPdfApi,
+  updateEducationPdfApi,
   deleteEducationPdfApi,
   reorderEducationPdfsApi,
   initRealtimeEventSource,
@@ -170,9 +171,15 @@ export function saveGlobalPdf(pdf: EducationPdfItem): void {
     window.dispatchEvent(new Event('nspc_data_changed'));
 
     // Persistent sync to MySQL database
-    saveEducationPdfApi(pdf).catch((err) =>
-      console.warn('[MySQL Global PDF Save Warning]', err)
-    );
+    if (existingIndex >= 0) {
+      updateEducationPdfApi(pdf).catch((err) =>
+        console.warn('[MySQL Global PDF Update Warning]', err)
+      );
+    } else {
+      saveEducationPdfApi(pdf).catch((err) =>
+        console.warn('[MySQL Global PDF Save Warning]', err)
+      );
+    }
   } catch (err) {
     console.error('Error saving global education PDF:', err);
   }
@@ -264,8 +271,38 @@ export const THREE_DAYS_MS = ONE_MINUTE_MS;
 let MEMORY_PATIENTS: Patient[] = [];
 
 export function getStoredPatients(): Patient[] {
+  const normalizePatient = (p: any): Patient => {
+    const logs = Array.isArray(p.progressLogs)
+      ? p.progressLogs
+      : Array.isArray(p.progress_logs)
+      ? p.progress_logs
+      : Array.isArray(p.dailyLogs)
+      ? p.dailyLogs
+      : Array.isArray(p.daily_logs)
+      ? p.daily_logs
+      : [];
+
+    let cleanMilestones: string[] = [];
+    if (Array.isArray(p.milestones)) {
+      cleanMilestones = p.milestones.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+    } else if (p.milestones && typeof p.milestones === 'object') {
+      for (const [k, v] of Object.entries(p.milestones)) {
+        if (Boolean(v)) cleanMilestones.push(k);
+      }
+    }
+
+    return {
+      ...p,
+      milestones: cleanMilestones,
+      dailyLogs: logs,
+      progressLogs: logs,
+      progress_logs: logs,
+      daily_logs: logs,
+    };
+  };
+
   if (MEMORY_PATIENTS && MEMORY_PATIENTS.length > 0) {
-    return [...MEMORY_PATIENTS];
+    return MEMORY_PATIENTS.map(normalizePatient);
   }
 
   try {
@@ -273,15 +310,17 @@ export function getStoredPatients(): Patient[] {
     if (data) {
       let list: Patient[] = JSON.parse(data);
       if (Array.isArray(list)) {
-        list = list.filter(
-          (p) =>
-            p &&
-            p.id &&
-            p.id !== 'p1-fitriani' &&
-            p.id !== 'p2-rahmawati' &&
-            p.id !== 'patient-default-01' &&
-            !p.id.startsWith('dummy-')
-        );
+        list = list
+          .filter(
+            (p) =>
+              p &&
+              p.id &&
+              p.id !== 'p1-fitriani' &&
+              p.id !== 'p2-rahmawati' &&
+              p.id !== 'patient-default-01' &&
+              !p.id.startsWith('dummy-')
+          )
+          .map(normalizePatient);
         MEMORY_PATIENTS = list;
         return [...list];
       }
@@ -366,10 +405,16 @@ export async function syncFromBackend(): Promise<Patient[]> {
   try {
     const remotePatients = await fetchPatientsApi();
     if (remotePatients && Array.isArray(remotePatients)) {
-      MEMORY_PATIENTS = remotePatients;
-      safeSaveToLocalStorage(STORAGE_KEY, remotePatients);
-      window.dispatchEvent(new Event('nspc_data_changed'));
-      return remotePatients;
+      // Filter out any corrupted or blank entries
+      const validRemote = remotePatients.filter(
+        (p) => p && typeof p === 'object' && p.id && (p.babyName || p.nickname)
+      );
+      if (validRemote.length > 0) {
+        MEMORY_PATIENTS = validRemote;
+        safeSaveToLocalStorage(STORAGE_KEY, validRemote);
+        window.dispatchEvent(new Event('nspc_data_changed'));
+        return validRemote;
+      }
     }
   } catch (err) {
     console.warn('[Storage] Sync from backend warning (using cache):', err);
@@ -476,7 +521,23 @@ export function updatePatient(updatedPatient: Patient): void {
     if (updatedPatient.status === 'Sudah Pulang' && !updatedPatient.dischargedAt) {
       updatedPatient.dischargedAt = new Date().toISOString();
     }
+    
+    // Normalize progress logs
+    const logs = Array.isArray(updatedPatient.dailyLogs)
+      ? updatedPatient.dailyLogs
+      : Array.isArray(updatedPatient.progressLogs)
+      ? updatedPatient.progressLogs
+      : Array.isArray(updatedPatient.progress_logs)
+      ? updatedPatient.progress_logs
+      : [];
+
+    updatedPatient.dailyLogs = logs;
+    updatedPatient.progressLogs = logs;
+    updatedPatient.progress_logs = logs;
+    updatedPatient.daily_logs = logs;
+
     patients[index] = updatedPatient;
+    MEMORY_PATIENTS = [...patients];
 
     // 1. Instant safe save & dispatch
     safeSaveToLocalStorage(STORAGE_KEY, patients);
@@ -494,13 +555,29 @@ export function addDailyLog(patientId: string, log: Omit<DailyLog, 'id' | 'creat
   const patient = patients.find((p) => p.id === patientId);
   if (!patient) return undefined;
 
+  const existingLogs: DailyLog[] = Array.isArray(patient.dailyLogs)
+    ? patient.dailyLogs
+    : Array.isArray(patient.progressLogs)
+    ? patient.progressLogs
+    : Array.isArray(patient.progress_logs)
+    ? patient.progress_logs
+    : [];
+
+  const weightVal = Number(log.weightGram || (log as any).weight || 0);
+
   const newLog: DailyLog = {
     ...log,
     id: 'log_' + Date.now(),
+    weightGram: weightVal,
+    weight: weightVal,
     createdAt: new Date().toISOString(),
   };
 
-  patient.dailyLogs = [newLog, ...patient.dailyLogs];
+  const updatedLogs = [newLog, ...existingLogs];
+  patient.dailyLogs = updatedLogs;
+  patient.progressLogs = updatedLogs;
+  patient.progress_logs = updatedLogs;
+  patient.daily_logs = updatedLogs;
 
   if (log.activeEquipment) {
     patient.currentEquipment = log.activeEquipment;
@@ -515,9 +592,13 @@ export function softDeletePatient(patientId: string): void {
   const patients = getStoredPatients();
   const index = patients.findIndex((p) => p.id === patientId);
   if (index !== -1) {
-    // 1. Instantly mark as deleted locally
-    patients[index].isDeleted = true;
-    patients[index].deletedAt = new Date().toISOString();
+    // 1. Instantly mark as deleted locally while keeping every single patient field completely intact
+    patients[index] = {
+      ...patients[index],
+      isDeleted: true,
+      deletedAt: new Date().toISOString(),
+      status: 'deleted',
+    };
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
@@ -533,8 +614,12 @@ export function restorePatient(patientId: string): void {
   const index = patients.findIndex((p) => p.id === patientId);
   if (index !== -1) {
     // 1. Instantly restore locally
-    patients[index].isDeleted = false;
-    delete patients[index].deletedAt;
+    patients[index] = {
+      ...patients[index],
+      isDeleted: false,
+      deletedAt: undefined,
+      status: 'Rawat NICU',
+    };
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
@@ -545,28 +630,35 @@ export function restorePatient(patientId: string): void {
   }
 }
 
-export function permanentlyDeletePatient(patientId: string): void {
+export async function permanentlyDeletePatient(patientId: string): Promise<void> {
   const patients = getStoredPatients();
   const filtered = patients.filter((p) => p.id !== patientId);
+  MEMORY_PATIENTS = filtered;
   safeSaveToLocalStorage(STORAGE_KEY, filtered);
   window.dispatchEvent(new Event('nspc_data_changed'));
 
-  deletePatientApi(patientId, true).catch((err) => {
+  try {
+    await deletePatientApi(patientId, true);
+  } catch (err) {
     console.warn('[Sync] Permanent delete saved locally, background sync warning:', err);
-  });
+  }
 }
 
-export function emptyTrash(): void {
+export async function emptyTrash(): Promise<void> {
   const patients = getStoredPatients();
-  const toDelete = patients.filter((p) => p.isDeleted);
-  const active = patients.filter((p) => !p.isDeleted);
+  const toDelete = patients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
+  const active = patients.filter((p) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
+  MEMORY_PATIENTS = active;
   safeSaveToLocalStorage(STORAGE_KEY, active);
   window.dispatchEvent(new Event('nspc_data_changed'));
-  emptyTrashApi().catch(() => {
-    toDelete.forEach((p) => {
-      deletePatientApi(p.id, true).catch((err) => console.warn('MySQL Empty Trash error:', err));
-    });
-  });
+  
+  try {
+    await emptyTrashApi();
+  } catch {
+    for (const p of toDelete) {
+      await deletePatientApi(p.id, true).catch((err) => console.warn('MySQL Empty Trash error:', err));
+    }
+  }
 }
 
 export function deletePatient(patientId: string): void {
@@ -583,11 +675,18 @@ export function markPatientDischarged(patientId: string, notes?: string, doctor?
 
   patient.status = 'Sudah Pulang';
   patient.dischargedAt = nowIso;
-  if (!patient.milestones) {
-    patient.milestones = { bolehPulang: true } as any;
-  } else {
-    patient.milestones.bolehPulang = true;
+  
+  const currentMilestones = Array.isArray(patient.milestones)
+    ? [...patient.milestones]
+    : (patient.milestones && typeof patient.milestones === 'object')
+    ? Object.entries(patient.milestones).filter(([_, v]) => Boolean(v)).map(([k]) => k)
+    : [];
+  
+  if (!currentMilestones.includes('SIAP & BOLEH PULANG') && !currentMilestones.includes('bolehPulang')) {
+    currentMilestones.push('SIAP & BOLEH PULANG');
   }
+  patient.milestones = currentMilestones;
+
   patient.dischargeSummary = {
     dischargeDate: nowIso.split('T')[0],
     dischargeWeightGram: latestWeight,
@@ -608,7 +707,16 @@ export function cancelPatientDischarge(patientId: string): Patient | undefined {
   patient.status = 'Rawat NICU';
   delete patient.dischargedAt;
   delete patient.dischargeSummary;
-  if (patient.milestones) {
+
+  if (Array.isArray(patient.milestones)) {
+    patient.milestones = patient.milestones.filter(
+      (m) =>
+        m !== 'SIAP & BOLEH PULANG' &&
+        m !== 'bolehPulang' &&
+        m !== 'Siap & Boleh Pulang' &&
+        m !== 'Boleh Pulang'
+    );
+  } else if (patient.milestones && typeof patient.milestones === 'object') {
     patient.milestones.bolehPulang = false;
   }
 
@@ -638,8 +746,15 @@ export function getStoredNakesUsers(): NakesUser[] {
   try {
     const data = localStorage.getItem(NAKES_USERS_KEY);
     if (data) {
-      const parsed: NakesUser[] = JSON.parse(data);
+      let parsed: NakesUser[] = JSON.parse(data);
       if (parsed && parsed.length > 0) {
+        // Filter out any legacy sample users
+        parsed = parsed.filter(
+          (u) =>
+            u &&
+            u.username?.toLowerCase() !== 'rizma' &&
+            !u.name?.toLowerCase().includes('rizma')
+        );
         const hasSuperAdmin = parsed.some((u) => u.username === 'superadmin' || u.isSuperAdmin || u.username === 'admin');
         if (!hasSuperAdmin) {
           const superAdminUser = INITIAL_NAKES_USERS[0];
@@ -647,6 +762,7 @@ export function getStoredNakesUsers(): NakesUser[] {
           localStorage.setItem(NAKES_USERS_KEY, JSON.stringify(merged));
           return merged;
         }
+        localStorage.setItem(NAKES_USERS_KEY, JSON.stringify(parsed));
         return parsed;
       }
     }
