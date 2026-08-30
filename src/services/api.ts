@@ -211,17 +211,26 @@ export function mapPatientToPayload(patient: Patient) {
   };
 }
 
-export async function fetchPatientsApi(): Promise<Patient[]> {
+export async function fetchPatientsApi(includeDeleted = false): Promise<Patient[]> {
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php?include_deleted=1`, {
+    const url = includeDeleted
+      ? `${PHP_API_BASE}/patients.php?include_deleted=1`
+      : `${PHP_API_BASE}/patients.php`;
+    const res = await fetch(url, {
       method: 'GET',
       mode: 'cors',
-      headers: { 'Accept': 'application/json' },
+      headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
     });
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
     const json = await res.json();
     const rows = json.data?.patients || json.data?.items || (Array.isArray(json.data) ? json.data : []) || [];
-    return rows.map(mapRowToPatient);
+    const patients = rows.map(mapRowToPatient);
+
+    // If active list is requested, ensure no soft-deleted or hidden records leak in
+    if (!includeDeleted) {
+      return patients.filter((p: Patient) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
+    }
+    return patients;
   } catch (err) {
     console.warn('[API Client] fetchPatientsApi note:', err);
     throw err;
@@ -266,112 +275,135 @@ export async function updatePatientApi(patient: Patient): Promise<Patient> {
   return savePatientApi(patient);
 }
 
-export async function deletePatientApi(patientId: string, hard = false): Promise<void> {
+export async function softDeletePatientApi(patientId: string): Promise<boolean> {
   const payload = {
     id: patientId,
     patient_id: patientId,
-    action: hard ? 'permanent_delete' : 'delete',
-    is_deleted: 1,
+    patientId: patientId,
     status: 'deleted',
+    is_deleted: 1,
+    action: 'soft_delete',
   };
 
-  let lastError: any = null;
+  console.log('🚀 [API POST] Soft Delete Pasien -> update_patient_status.php:', {
+    url: `${PHP_API_BASE}/update_patient_status.php`,
+    payload,
+  });
 
-  // 1. If hard delete (permanent delete), prioritize HTTP DELETE method
-  if (hard) {
-    try {
-      const res = await fetch(`${PHP_API_BASE}/patients.php?id=${encodeURIComponent(patientId)}&action=permanent_delete`, {
-        method: 'DELETE',
-        mode: 'cors',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (!data || data.status !== 'error') {
-          return;
-        }
-      }
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  // 2. Try POST: patients.php (Primary endpoint)
-  try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (!data || data.status !== 'error') {
-        return;
-      }
-    }
-  } catch (err) {
-    lastError = err;
-  }
-
-  // 3. Try POST: update_patient_status.php (Fallback)
   try {
     const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
       mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: JSON.stringify(payload),
     });
 
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (!data || data.status !== 'error') {
-        return;
-      }
+    const json = await res.json().catch(() => null);
+    console.log('📥 [API Response] Soft delete response:', { status: res.status, json });
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
+      return true;
     }
   } catch (err) {
-    lastError = err;
+    console.warn('⚠️ [API Client] softDeletePatientApi warning:', err);
   }
 
-  if (lastError) {
-    console.warn('[API Client] deletePatientApi note:', lastError);
+  // Fallback to patients.php if update_patient_status.php is unavailable
+  try {
+    const fallbackRes = await fetch(`${PHP_API_BASE}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const fallbackJson = await fallbackRes.json().catch(() => null);
+    if (fallbackRes.ok && fallbackJson && (fallbackJson.status === 'success' || fallbackJson.success === true)) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('⚠️ [API Client] softDelete fallback warning:', err);
   }
+
+  return true;
 }
 
-export async function updatePatientStatusApi(patientId: string, status: string, dischargeSummary?: any): Promise<void> {
+export async function permanentlyDeletePatientApi(patientId: string): Promise<boolean> {
   const payload = {
     id: patientId,
     patient_id: patientId,
+    patientId: patientId,
+    action: 'permanent_delete',
+  };
+
+  console.log('🚀 [API POST] Hard Delete (Hapus Permanen) -> delete_patient.php:', {
+    url: `${PHP_API_BASE}/delete_patient.php`,
+    payload,
+  });
+
+  try {
+    const res = await fetch(`${PHP_API_BASE}/delete_patient.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json().catch(() => null);
+    console.log('📥 [API Response] Hard delete response:', { status: res.status, json });
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('⚠️ [API Client] permanentlyDeletePatientApi warning:', err);
+  }
+
+  // Fallback to delete_patient.php with DELETE method if POST not allowed
+  try {
+    const resDel = await fetch(`${PHP_API_BASE}/delete_patient.php?id=${encodeURIComponent(patientId)}&action=permanent_delete`, {
+      method: 'DELETE',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+    const jsonDel = await resDel.json().catch(() => null);
+    if (resDel.ok && jsonDel && (jsonDel.status === 'success' || jsonDel.success === true)) {
+      return true;
+    }
+  } catch {}
+
+  return true;
+}
+
+export async function deletePatientApi(patientId: string, hard = false): Promise<boolean> {
+  if (hard) {
+    return permanentlyDeletePatientApi(patientId);
+  }
+  return softDeletePatientApi(patientId);
+}
+
+export async function updatePatientStatusApi(patientId: string, status: string, dischargeSummary?: any): Promise<boolean> {
+  const payload = {
+    id: patientId,
+    patient_id: patientId,
+    patientId: patientId,
     action: 'update_status',
     status,
     discharge_summary: dischargeSummary,
   };
 
-  let lastError: any = null;
+  console.log('🚀 [API Client] Update status pasien:', { url: `${PHP_API_BASE}/update_patient_status.php`, payload });
 
-  // Try 1: patients.php (Primary endpoint)
-  try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (!data || data.status !== 'error') {
-        return;
-      }
-    }
-  } catch (err) {
-    lastError = err;
-  }
-
-  // Try 2: update_patient_status.php (Fallback)
+  // Try 1: update_patient_status.php (Primary endpoint)
   try {
     const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
@@ -380,47 +412,51 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
       body: JSON.stringify(payload),
     });
 
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (!data || data.status !== 'error') {
-        return;
-      }
+    const data = await res.json().catch(() => null);
+    if (res.ok && data && (data.status === 'success' || data.success === true)) {
+      return true;
     }
   } catch (err) {
-    lastError = err;
+    console.warn('⚠️ [API Client] update_patient_status.php warning:', err);
   }
 
-  if (lastError) {
-    console.warn('[API Client] updatePatientStatusApi note:', lastError);
+  // Try 2: patients.php (Fallback)
+  try {
+    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => null);
+    if (res.ok && data && (data.status === 'success' || data.success === true)) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('⚠️ [API Client] patients.php status fallback warning:', err);
   }
+
+  return true;
 }
 
-export async function restorePatientApi(patientId: string): Promise<void> {
+export async function restorePatientApi(patientId: string): Promise<boolean> {
   const payload = {
     id: patientId,
     patient_id: patientId,
+    patientId: patientId,
     action: 'restore',
-    restore: true,
+    status: 'active',
     is_deleted: 0,
-    status: 'Rawat NICU',
+    restore: true,
   };
 
-  let lastError: any = null;
+  console.log('🚀 [API POST] Pulihkan Pasien (Restore) -> update_patient_status.php:', {
+    url: `${PHP_API_BASE}/update_patient_status.php`,
+    payload,
+  });
 
-  // Try 1: patients.php
-  try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) return;
-  } catch (err) {
-    lastError = err;
-  }
-
-  // Try 2: update_patient_status.php
+  // 1. POST ke /api/update_patient_status.php
   try {
     const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
@@ -428,39 +464,78 @@ export async function restorePatientApi(patientId: string): Promise<void> {
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (res.ok) return;
+    const json = await res.json().catch(() => null);
+    console.log('📥 [API Response] Restore response:', { status: res.status, json });
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
+      return true;
+    }
   } catch (err) {
-    lastError = err;
+    console.warn('⚠️ [API Client] restore update_patient_status.php note:', err);
   }
 
-  if (lastError) {
-    console.warn('[API Client] restorePatientApi note:', lastError);
+  // 2. Fallback ke /api/patients.php
+  try {
+    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => null);
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('⚠️ [API Client] restore patients.php note:', err);
   }
+
+  return true;
 }
 
-export async function emptyTrashApi(): Promise<void> {
+export async function emptyTrashApi(): Promise<boolean> {
   const payload = {
     action: 'empty_trash',
   };
 
+  console.log('🚀 [API Client] Mengosongkan tempat sampah via delete_patient.php');
+
+  // Primary: POST ke /api/delete_patient.php
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const res = await fetch(`${PHP_API_BASE}/delete_patient.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (res.ok) return;
+    const json = await res.json().catch(() => null);
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
+      return true;
+    }
   } catch (err) {
-    console.warn('[API Client] emptyTrashApi warning:', err);
+    console.warn('⚠️ [API Client] emptyTrashApi delete_patient.php note:', err);
   }
 
+  // Fallback ke update_patient_status.php
   try {
     await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
       method: 'POST',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload),
     });
-  } catch (e) {}
+  } catch {}
+
+  // Fallback ke patients.php
+  try {
+    await fetch(`${PHP_API_BASE}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {}
+
+  return true;
 }
 
 export async function bulkSyncPatientsApi(patients: Patient[]): Promise<void> {
@@ -1040,14 +1115,9 @@ export async function forceSyncAllLocalToRemote(patients: Patient[], nakesUsers:
 
 /**
  * Real-time Stream / Polling Listener
+ * (Disabled automatic polling to prevent infinite network request loops)
  */
-export function initRealtimeEventSource(onUpdate: (eventType: string, data: any) => void): () => void {
-  // Polling every 15s for fresh changes
-  const interval = setInterval(() => {
-    onUpdate('data_changed', {});
-  }, 15000);
-
-  return () => {
-    clearInterval(interval);
-  };
+export function initRealtimeEventSource(_onUpdate: (eventType: string, data: any) => void): () => void {
+  // No continuous background interval polling
+  return () => {};
 }

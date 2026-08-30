@@ -389,7 +389,7 @@ export const FlowchartModal: React.FC<FlowchartModalProps> = ({ isOpen, onClose 
         <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Alur terintegrasi otomatis dengan penyimpanan local storage & Supabase Cloud database.</span>
+            <span>Alur terintegrasi otomatis dengan penyimpanan local cache & REST API Hostinger MySQL database.</span>
           </div>
           <button
             onClick={onClose}

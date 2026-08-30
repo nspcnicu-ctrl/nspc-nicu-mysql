@@ -232,6 +232,62 @@ async function startServer() {
     }
   });
 
+  // Dedicated delete_patient.php endpoint
+  app.all(['/api/delete_patient', '/api/delete_patient.php'], async (req: Request, res: Response) => {
+    try {
+      if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+      }
+      const body = req.body || {};
+      const action = String(req.query.action || body.action || 'permanent_delete').toLowerCase();
+      const patientId = String(req.query.id || body.id || body.patient_id || body.patientId || '');
+
+      if (action === 'empty_trash' || action === 'clear_trash') {
+        const patients = await getAllPatients({ includeDeleted: true });
+        const toDelete = patients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
+        for (const p of toDelete) {
+          await deletePatientById(p.id, true);
+        }
+        broadcastRealtimeEvent('data_changed', { type: 'empty_trash' });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: `Tempat sampah berhasil dikosongkan (${toDelete.length} pasien dihapus permanen).`,
+          deleted_count: toDelete.length,
+        });
+      }
+
+      if (!patientId) {
+        return res.status(400).json({ status: 'error', success: false, message: 'ID Pasien wajib disertakan.' });
+      }
+
+      if (action === 'soft_delete' || action === 'trash' || body.is_deleted === 1 || body.is_deleted === '1') {
+        await deletePatientById(patientId, false);
+        broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: false });
+        broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+        return res.json({
+          status: 'success',
+          success: true,
+          message: 'Pasien berhasil dipindahkan ke sampah.',
+          id: patientId,
+        });
+      }
+
+      // Default: Permanent delete
+      await deletePatientById(patientId, true);
+      broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: true });
+      broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
+      return res.json({
+        status: 'success',
+        success: true,
+        message: 'Pasien berhasil dihapus permanen dari MySQL.',
+        id: patientId,
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', success: false, message: err.message });
+    }
+  });
+
   app.all(['/api/update_patient_status', '/api/update_patient_status.php'], async (req: Request, res: Response) => {
     try {
       if (req.method === 'GET') {

@@ -1575,6 +1575,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
         ) : (
           displayedPatients.map((p) => {
             const isAterm = p.gestationCategory === 'aterm';
+            const isDeletedItem = isPatientDeleted(p);
             const latestLog = p.dailyLogs[0];
             const currentWeight = latestLog ? latestLog.weightGram : p.initialAnthropometry.weightGram;
 
@@ -1582,7 +1583,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
               <div
                 key={p.id}
                 className={`bg-white rounded-3xl border shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden ${
-                  p.isDeleted ? 'border-rose-200 bg-rose-50/20' : 'border-slate-100'
+                  isDeletedItem ? 'border-rose-200 bg-rose-50/20' : 'border-slate-100'
                 }`}
               >
                 <div className="p-5 space-y-4">
@@ -1635,7 +1636,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
                           {/* Status Badge matching uploaded image */}
                           <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 ${
-                            p.isDeleted
+                            isDeletedItem
                               ? 'bg-rose-500 text-white'
                               : p.status === 'Sudah Pulang'
                               ? 'bg-pink-100/90 text-pink-700 border border-pink-200'
@@ -1643,7 +1644,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                               : 'bg-teal-50 text-teal-800 border border-teal-200'
                           }`}>
-                            {p.isDeleted ? (
+                            {isDeletedItem ? (
                               '🗑️ Terhapus'
                             ) : p.status === 'Sudah Pulang' ? (
                               <>
@@ -1675,7 +1676,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                     </div>
 
                   {/* Alumni status badge */}
-                  {p.status === 'Sudah Pulang' && !p.isDeleted && (
+                  {p.status === 'Sudah Pulang' && !isDeletedItem && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <GraduationCap className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1690,7 +1691,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                   )}
 
                   {/* Soft deleted status badge */}
-                  {p.isDeleted && (
+                  {isDeletedItem && (
                     <div className="p-3 bg-rose-100/80 border border-rose-300 rounded-2xl text-xs text-rose-950 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <Trash2 className="w-4 h-4 text-rose-700 shrink-0" />
@@ -1786,7 +1787,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                 </div>
 
                 {/* Card Footer Actions */}
-                {p.isDeleted ? (
+                {isDeletedItem ? (
                   <div className="bg-rose-50/80 p-3 border-t border-rose-200 flex items-center justify-between gap-2">
                     <button
                       onClick={() => handleRestore(p)}

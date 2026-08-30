@@ -74,35 +74,22 @@ export default function App() {
   useEffect(() => {
     const loadedPatients = refreshPatients();
 
-    // Trigger initial background sync from MySQL Database
-    syncFromBackend().then(() => {
-      refreshPatients();
-    });
-    syncNakesFromBackend().catch((e) => console.warn(e));
-    syncGlobalPdfsFromBackend().then(() => {
-      refreshPatients();
-    }).catch((e) => console.warn(e));
+    // 1. Initial 1-time fetch on component mount
+    syncFromBackend()
+      .then(() => {
+        refreshPatients();
+      })
+      .catch((e) => console.warn('[App] Initial patient sync note:', e));
 
-    // Listen to real-time updates broadcasted via SSE
-    const handleDataChanged = () => {
-      refreshPatients();
-    };
-    window.addEventListener('nspc_data_changed', handleDataChanged);
+    syncNakesFromBackend().catch((e) => console.warn('[App] Initial nakes sync note:', e));
 
-    // Periodic background auto-sync every 4 seconds and on tab focus / visibility change
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        syncFromBackend().then(() => refreshPatients()).catch(() => {});
-        syncNakesFromBackend().catch(() => {});
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    const interval = setInterval(() => {
-      syncFromBackend().then(() => refreshPatients()).catch(() => {});
-      syncNakesFromBackend().catch(() => {});
-    }, 4000);
+    syncGlobalPdfsFromBackend()
+      .then(() => {
+        refreshPatients();
+      })
+      .catch((e) => console.warn('[App] Initial PDF sync note:', e));
 
-    // Parse URL Query parameters for direct parent link access (e.g. ?nickname=...&pass=...)
+    // 2. Parse URL Query parameters for direct parent link access (e.g. ?nickname=...&pass=...)
     const params = new URLSearchParams(window.location.search);
     const urlNick = params.get('nickname') || params.get('nick');
     const urlPass = params.get('pass') || params.get('password');
@@ -126,17 +113,16 @@ export default function App() {
     // Always start at portal landing page on fresh link / tab open (mandatory login)
     setCurrentRole(null);
 
-    // Listen for storage changes across components or tabs
+    // 3. Listen for local state changes triggered by user actions (Add, Edit, Delete, Restore)
     const handleStorageEvent = () => {
       refreshPatients();
     };
     window.addEventListener('nspc_data_changed', handleStorageEvent);
+
     return () => {
       window.removeEventListener('nspc_data_changed', handleStorageEvent);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(interval);
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs exactly ONCE on mount
 
   // Sync current patient when patient list updates
   useEffect(() => {

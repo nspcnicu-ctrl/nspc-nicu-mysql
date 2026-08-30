@@ -9,6 +9,8 @@ import {
   savePatientApi,
   updatePatientApi,
   updatePatientStatusApi,
+  softDeletePatientApi,
+  permanentlyDeletePatientApi,
   deletePatientApi,
   restorePatientApi,
   emptyTrashApi,
@@ -399,11 +401,12 @@ function safeSaveToLocalStorage(key: string, patients: Patient[]): void {
 }
 
 /**
- * Real-time Bidirectional Synchronization: Sync data directly from MySQL backend
+ * Real-time Bidirectional Synchronization: Sync data directly from Hostinger MySQL backend
  */
 export async function syncFromBackend(): Promise<Patient[]> {
   try {
-    const remotePatients = await fetchPatientsApi();
+    // Include soft-deleted patients so Trash tab and Active tabs both remain accurately in sync with MySQL
+    const remotePatients = await fetchPatientsApi(true);
     if (remotePatients && Array.isArray(remotePatients)) {
       // Filter out any corrupted or blank entries
       const validRemote = remotePatients.filter(
@@ -602,9 +605,9 @@ export function softDeletePatient(patientId: string): void {
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
-    // 2. Background API call to server
+    // 2. HTTP POST JSON Body API call to Hostinger MySQL
     deletePatientApi(patientId, false).catch((err) => {
-      console.warn('[Sync] Soft delete saved locally, background sync warning:', err);
+      console.warn('[Sync] Soft delete background sync note:', err);
     });
   }
 }
@@ -623,9 +626,9 @@ export function restorePatient(patientId: string): void {
     safeSaveToLocalStorage(STORAGE_KEY, patients);
     window.dispatchEvent(new Event('nspc_data_changed'));
 
-    // 2. Background API call to server
+    // 2. HTTP POST JSON Body API call to Hostinger MySQL
     restorePatientApi(patientId).catch((err) => {
-      console.warn('[Sync] Restore saved locally, background sync warning:', err);
+      console.warn('[Sync] Restore background sync note:', err);
     });
   }
 }
@@ -640,7 +643,7 @@ export async function permanentlyDeletePatient(patientId: string): Promise<void>
   try {
     await deletePatientApi(patientId, true);
   } catch (err) {
-    console.warn('[Sync] Permanent delete saved locally, background sync warning:', err);
+    console.warn('[Sync] Permanent delete background sync note:', err);
   }
 }
 

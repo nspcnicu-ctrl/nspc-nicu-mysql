@@ -81,11 +81,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setActiveTab(initialRole === 'nakes' ? 'nakes' : 'parent');
       if (initialNickname) setNickname(initialNickname);
       if (initialPassword) setPassword(initialPassword);
-      // Auto-trigger sync when modal opens to ensure mobile device has latest data
-      syncFromBackend().catch(() => {});
-      syncNakesFromBackend().then((users) => {
-        if (users) setNakesList(users);
-      }).catch(() => {});
     }
   }, [isOpen, initialRole, initialNickname, initialPassword]);
 
