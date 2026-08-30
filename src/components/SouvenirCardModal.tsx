@@ -259,7 +259,7 @@ export const SouvenirCardModal: React.FC<SouvenirCardModalProps> = ({
                   "{patient.dischargeSummary?.dischargeNotes || 'Selamat atas kepulangan si kecil! Semoga tumbuh menjadi anak yang sehat, kuat, dan membawa kebahagiaan bagi Ayah dan Bunda.'}"
                 </p>
                 <span className="text-[11px] font-bold text-teal-800 block print:text-[9px]">
-                  — Tim Dokter & Perawat NICU RSUD Undata Palu
+                  — Tim NICU
                 </span>
               </div>
 
@@ -268,7 +268,7 @@ export const SouvenirCardModal: React.FC<SouvenirCardModalProps> = ({
                   <span className="font-serif italic text-teal-900 font-bold text-xs">RSUD Undata</span>
                 </div>
                 <p className="text-[10px] font-bold text-slate-800 print:text-[8px]">
-                  {patient.dischargeSummary?.doctorInCharge || 'Tim DPJP NICU RSUD Undata'}
+                  {patient.dischargeSummary?.doctorInCharge || 'Tim NICU'}
                 </p>
                 <p className="text-[9px] text-slate-500 print:text-[7px]">
                   Palu, {patient.dischargeSummary?.dischargeDate || new Date().toISOString().split('T')[0]}

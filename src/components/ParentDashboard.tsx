@@ -13,9 +13,10 @@ import {
   formatIndonesianDate,
   formatShortDate,
 } from '../utils/dateUtils';
-import { isMilestoneChecked } from '../utils/milestones';
+import { isMilestoneChecked, isPatientEligibleForPrint } from '../utils/milestones';
 import { SouvenirCardModal } from './SouvenirCardModal';
 import { SelectPhotoModal } from './SelectPhotoModal';
+import { EducationLightboxModal } from './EducationLightboxModal';
 import {
   LineChart,
   Line,
@@ -64,6 +65,7 @@ import {
   X,
   Grid,
   List,
+  Lock,
 } from 'lucide-react';
 import { downloadEducationPdf } from '../utils/pdfDownload';
 import { generateSamplePdfDataUrl, renderPdfFirstPageToImage, generateFallbackPdfCover } from '../services/pdfRender';
@@ -108,6 +110,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
   const [selectedLogIndex, setSelectedLogIndex] = useState<number>(0);
   const [isSouvenirOpen, setIsSouvenirOpen] = useState<boolean>(false);
   const [isSelectPhotoModalOpen, setIsSelectPhotoModalOpen] = useState<boolean>(false);
+  const [isLockedNoticeOpen, setIsLockedNoticeOpen] = useState<boolean>(false);
   const [showEducationFolder, setShowEducationFolder] = useState<boolean>(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('Semua');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -138,6 +141,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
 
   const currentLog = progressLogs[selectedLogIndex] || progressLogs[0];
   const isAterm = patient.gestationCategory === 'aterm';
+  const isEligibleForPrint = isPatientEligibleForPrint(patient);
 
   // Trigger celebration if Boleh Pulang is unlocked
   const triggerCelebration = () => {
@@ -198,7 +202,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
     let isMounted = true;
     const fetchLivePdfs = async () => {
       try {
-        const live = await syncGlobalPdfsFromBackend();
+        const live = await syncGlobalPdfsFromBackend(true);
         if (live && isMounted) {
           setLiveEducationPdfs(live);
         }
@@ -454,8 +458,8 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
             Tidak ada dokumen PDF edukasi yang cocok dengan pencarian / kategori ini.
           </div>
         ) : viewMode === 'grid' ? (
-          /* GRID GALLERY LAYOUT (MATCHING IMAGE SCREENSHOT) */
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          /* GRID GALLERY LAYOUT (5 COLUMNS ON DESKTOP) */
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5">
             {filteredPdfs.map((pdf, index) => {
               const coverImg =
                 renderedCovers[pdf.id] ||
@@ -552,89 +556,12 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
           </div>
         )}
 
-        {/* PREVIEW MODAL (DESAIN SAMA PERSIS SESUAI SCREENSHOT) */}
-        {/* PRATINJAU MODAL EDUKASI SESUAI GAMBAR TAMPILAN ADMIN NAKES */}
-        {previewPdfItem && (
-          <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-[9999] animate-fadeIn font-sans">
-            <div className="bg-white rounded-[28px] max-w-3xl w-full flex flex-col shadow-2xl overflow-hidden relative max-h-[94vh] border border-slate-100">
-              {/* 1. DARK TEAL HEADER BANNER */}
-              <div className="bg-[#005c4b] px-6 py-4 text-white flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center shrink-0">
-                    <FileText className="w-5 h-5 text-emerald-200 stroke-[2.2]" />
-                  </div>
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-white leading-tight">
-                      {previewPdfItem.title}
-                    </h3>
-                    <div className="text-xs text-emerald-100 font-medium mt-0.5">
-                      Kategori: {previewPdfItem.category} &bull; {previewPdfItem.publishedAt}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setPreviewPdfItem(null)}
-                  className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
-                  title="Tutup Pratinjau"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* 2. MODAL BODY (CATATAN NAKES + HIGH-RES IMAGE DISPLAY) */}
-              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 bg-white">
-                {/* CATATAN KHUSUS NAKES */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-xs space-y-1">
-                  <div className="text-xs font-black text-[#005c4b]">
-                    Catatan Khusus Nakes:
-                  </div>
-                  <div className="text-xs italic text-slate-700 font-medium">
-                    "{previewPdfItem.nakesNote || 'Harap pelajari petunjuk dalam modul ini dengan seksama.'}"
-                  </div>
-                </div>
-
-                {/* Native PDF / Google Drive Iframe Viewer */}
-                <PdfViewerCanvas
-                  dataUrl={previewPdfItem.fileDataUrl || getPdfDataUrlSync(previewPdfItem.id)}
-                  title={previewPdfItem.title}
-                  fileName={previewPdfItem.fileName}
-                  nakesNote={previewPdfItem.nakesNote}
-                  onDownload={() => handleDownloadPdf(previewPdfItem)}
-                />
-              </div>
-
-              {/* 3. MODAL FOOTER */}
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-                <div className="text-xs font-medium text-slate-500">
-                  Sistem Informasi Rekam Medis NSPC &bull; RSUD Undata
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewPdfItem(null)}
-                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs rounded-2xl transition-all cursor-pointer"
-                  >
-                    Tutup
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleDownloadPdf(previewPdfItem);
-                    }}
-                    className="px-5 py-2.5 bg-[#005c4b] hover:bg-[#004a3c] text-white font-extrabold text-xs rounded-2xl transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Download className="w-4 h-4 text-emerald-300" />
-                    <span>Unduh PDF</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* MODAL PRATINJAU LANGSUNG GAMBAR / DOKUMEN TANPA BINGKAI */}
+        <EducationLightboxModal
+          pdf={previewPdfItem}
+          onClose={() => setPreviewPdfItem(null)}
+          onDownload={(pdf) => handleDownloadPdf(pdf)}
+        />
       </div>
     );
   }
@@ -649,23 +576,23 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
           NICU
         </div>
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 sm:gap-6">
+          <div className="space-y-3 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               {/* 1. KEMBALI KE PORTAL / DASHBOARD NAKES BUTTON */}
               {onBackToNakes ? (
                 <button
                   onClick={onBackToNakes}
-                  className="px-3.5 py-1 bg-amber-400 hover:bg-amber-300 text-amber-950 font-extrabold text-xs rounded-full flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+                  className="px-3 py-1 sm:px-3.5 sm:py-1 bg-amber-400 hover:bg-amber-300 text-amber-950 font-extrabold text-[11px] sm:text-xs rounded-full flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
                   title="Kembali ke Dashboard Nakes"
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
                   <span>Kembali ke Dashboard Nakes</span>
                 </button>
               ) : onBackToHome ? (
                 <button
                   onClick={onBackToHome}
-                  className="px-3.5 py-1 bg-white/20 hover:bg-white/30 text-white font-bold text-xs rounded-full border border-white/30 flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-xs backdrop-blur-md"
+                  className="px-3 py-1 sm:px-3.5 sm:py-1 bg-white/20 hover:bg-white/30 text-white font-bold text-[11px] sm:text-xs rounded-full border border-white/30 flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-xs backdrop-blur-md"
                   title="Kembali ke Halaman Utama / Portal"
                 >
                   <ArrowLeft className="w-3.5 h-3.5 text-teal-100 shrink-0" />
@@ -674,13 +601,13 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
               ) : null}
 
               {/* 2. NSPC BADGE */}
-              <span className="px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-xs font-semibold tracking-wide text-teal-100 border border-white/20 flex items-center gap-1.5 shrink-0">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                NSPC • Neo Smart Progress Card
+              <span className="px-2.5 sm:px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-[11px] sm:text-xs font-semibold tracking-wide text-teal-100 border border-white/20 flex items-center gap-1.5 shrink-0">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>NSPC • Neo Smart Progress Card</span>
               </span>
 
               {/* 3. RAWAT NICU / STATUS BADGE */}
-              <span className={`px-3 py-1 rounded-full text-xs font-bold shrink-0 ${
+              <span className={`px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold shrink-0 ${
                 patient.status === 'Siap Pulang' || patient.milestones.bolehPulang
                   ? 'bg-emerald-400 text-emerald-950 animate-bounce'
                   : 'bg-amber-400/90 text-amber-950'
@@ -689,12 +616,12 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
               </span>
 
               {/* 4. INKUBATOR / RUANG BADGE */}
-              <span className="px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-xs font-medium text-teal-100 border border-white/20 shrink-0">
+              <span className="px-2.5 sm:px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-[11px] sm:text-xs font-medium text-teal-100 border border-white/20 shrink-0">
                 {patient.roomNumber || 'Inkubator 01 - NICU RSUD Undata'}
               </span>
             </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3.5 sm:gap-4">
               {/* Clickable Baby Photo Avatar */}
               <button
                 type="button"
@@ -719,11 +646,11 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 </div>
               </button>
 
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white flex items-center gap-2">
-                  <span>{patient.babyName}</span>
+                  <span className="truncate">{patient.babyName}</span>
                 </h1>
-                <p className="text-teal-100/90 text-sm sm:text-base mt-1 font-medium">
+                <p className="text-teal-100/90 text-xs sm:text-sm md:text-base mt-1 font-medium leading-relaxed">
                   Putra/Putri tercinta dari <strong className="text-white">Bunda {patient.motherName}</strong> & <strong className="text-white">Ayah {patient.fatherName}</strong>
                 </p>
                 <button
@@ -738,32 +665,86 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <button
-              onClick={() => setIsSouvenirOpen(true)}
-              className="inline-flex items-center gap-2 px-4.5 py-2.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-amber-950 font-extrabold text-sm shadow-md transition-all transform hover:-translate-y-0.5"
-            >
-              <Award className="w-4 h-4 text-amber-900" />
-              <span>Kartu Kenangan & Kelulusan</span>
-            </button>
+          <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 w-full lg:w-auto pt-2 lg:pt-0 border-t lg:border-t-0 border-white/15">
+            {isEligibleForPrint ? (
+              <button
+                type="button"
+                onClick={() => setIsSouvenirOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-amber-950 font-extrabold text-xs sm:text-sm shadow-md transition-all transform hover:-translate-y-0.5 cursor-pointer w-full sm:w-auto"
+                title="Buka Kartu Kenangan & Kelulusan"
+              >
+                <Award className="w-4 h-4 text-amber-900 shrink-0" />
+                <span className="whitespace-nowrap">Kartu Kenangan & Kelulusan</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsLockedNoticeOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white/90 font-bold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer group shadow-2xs backdrop-blur-xs w-full sm:w-auto"
+                title="Fitur Cetak Kartu Kenangan & Kelulusan Terkunci (Hanya untuk Pasien Siap Pulang & Alumni)"
+              >
+                <Lock className="w-4 h-4 text-amber-300 group-hover:scale-110 transition-transform shrink-0" />
+                <span className="whitespace-nowrap">Kartu Kenangan & Kelulusan</span>
+                <span className="px-2 py-0.5 bg-amber-400/30 text-amber-200 text-[10px] font-black rounded-full border border-amber-300/40 shrink-0">
+                  Terkunci
+                </span>
+              </button>
+            )}
+
+            {isEligibleForPrint ? (
+              <button
+                type="button"
+                onClick={onOpenPrintModal}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-teal-900 font-bold text-xs sm:text-sm shadow-md hover:bg-teal-50 transition-all transform hover:-translate-y-0.5 cursor-pointer w-full sm:w-auto"
+                title="Cetak Kartu Rekapitulasi NSPC"
+              >
+                <Printer className="w-4 h-4 text-teal-700 shrink-0" />
+                <span className="whitespace-nowrap">Cetak Kartu NSPC</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsLockedNoticeOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white/90 font-bold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer group shadow-2xs backdrop-blur-xs w-full sm:w-auto"
+                title="Fitur Cetak Kartu NSPC Terkunci (Hanya untuk Pasien Siap Pulang & Alumni)"
+              >
+                <Lock className="w-4 h-4 text-teal-300 group-hover:scale-110 transition-transform shrink-0" />
+                <span className="whitespace-nowrap">Cetak Kartu NSPC</span>
+                <span className="px-2 py-0.5 bg-teal-400/30 text-teal-200 text-[10px] font-black rounded-full border border-teal-300/40 shrink-0">
+                  Terkunci
+                </span>
+              </button>
+            )}
 
             <button
-              onClick={onOpenPrintModal}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-teal-900 font-bold text-sm shadow-md hover:bg-teal-50 transition-all transform hover:-translate-y-0.5"
-            >
-              <Printer className="w-4 h-4 text-teal-700" />
-              <span>Cetak Kartu NSPC</span>
-            </button>
-
-            <button
+              type="button"
               onClick={onShareLink}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm border border-white/20 transition-all"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer w-full sm:w-auto"
             >
-              <Share2 className="w-4 h-4" />
-              <span>Bagikan Link</span>
+              <Share2 className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">Bagikan Link</span>
             </button>
           </div>
         </div>
+
+        {/* LOCKED PRINT NOTICE INFO PILL FOR CURRENTLY TREATED PATIENTS */}
+        {!isEligibleForPrint && (
+          <div className="mt-4 p-3.5 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 text-teal-100">
+              <Info className="w-4 h-4 text-amber-300 shrink-0" />
+              <p className="leading-relaxed text-[11px] sm:text-xs">
+                <strong className="text-white">Informasi Pencetakan:</strong> Tombol <em>Kartu Kenangan & Kelulusan</em> dan <em>Cetak Kartu NSPC</em> akan terbuka otomatis setelah status si kecil dikonfirmasi <strong>Siap Pulang</strong> atau <strong>Alumni NICU</strong> oleh Tim Medis.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsLockedNoticeOpen(true)}
+              className="px-3 py-1 bg-amber-400/25 hover:bg-amber-400/40 text-amber-200 hover:text-white font-extrabold text-[11px] rounded-xl border border-amber-300/30 shrink-0 transition-all cursor-pointer self-start sm:self-auto"
+            >
+              Pelajari Kriteria
+            </button>
+          </div>
+        )}
 
         {/* DISCHARGED ALUMNI CELEBRATION BANNER */}
         {patient.status === 'Sudah Pulang' && (
@@ -1670,6 +1651,109 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
           }
         }}
       />
+
+      {/* LOCKED PRINT NOTICE MODAL */}
+      {isLockedNoticeOpen && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-[9999] animate-fadeIn font-sans">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[92vh]">
+            {/* Header Banner */}
+            <div className="bg-teal-900 px-5 sm:px-6 py-4 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-md shrink-0">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white leading-tight">
+                    Fitur Cetak Belum Terbuka
+                  </h3>
+                  <p className="text-xs text-emerald-200 mt-0.5">
+                    Akses Khusus Pasien Siap Pulang & Alumni NICU
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsLockedNoticeOpen(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                title="Tutup"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body Content */}
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto text-xs">
+              {/* Patient Current Status Banner */}
+              <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-black text-amber-950 text-xs">
+                    Status Pasien Saat Ini: <span className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded-md ml-1">{patient.status}</span>
+                  </div>
+                  <p className="text-amber-900 leading-relaxed text-[11px]">
+                    Saat ini buah hati <strong>{patient.babyName}</strong> masih dalam masa perawatan & observasi medis intensif di NICU RSUD Undata.
+                  </p>
+                </div>
+              </div>
+
+              {/* Requirement Explanation */}
+              <div className="space-y-2.5">
+                <h4 className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-700" />
+                  <span>Kriteria Pembukaan Fitur Cetak:</span>
+                </h4>
+                <p className="text-slate-600 leading-relaxed text-xs">
+                  Pencetakan <strong>Kartu Kenangan & Kelulusan</strong> serta <strong>Kartu Rekapitulasi NSPC</strong> hanya dapat dilakukan jika pasien telah mencapai salah satu kategori berikut:
+                </p>
+
+                <div className="space-y-2 pt-1">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 font-bold flex items-center justify-center shrink-0 text-[10px]">
+                      1
+                    </span>
+                    <div>
+                      <strong className="text-slate-800 block text-xs">Kategori "Siap Pulang"</strong>
+                      <span className="text-slate-500 text-[11px] leading-relaxed block mt-0.5">
+                        Indikator kesiapan kepulangan telah lengkap (tanda vital stabil, refleks hisap baik, lepas alat bantuan napas, selesai PMK & edukasi orang tua) dan status kepulangan telah disetujui dokter DPJP.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-[10px]">
+                      2
+                    </span>
+                    <div>
+                      <strong className="text-slate-800 block text-xs">Kategori "Sudah Pulang / Alumni NICU"</strong>
+                      <span className="text-slate-500 text-[11px] leading-relaxed block mt-0.5">
+                        Si kecil telah resmi lulus perawatan dari NICU RSUD Undata dan diperbolehkan pulang ke rumah.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-teal-50/80 rounded-xl border border-teal-200/80 text-teal-950 text-[11px] leading-relaxed flex items-start gap-2">
+                <Info className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Akses Perkembangan:</strong> Ayah & Bunda tetap dapat memantau grafik berat badan, catatan harian perawat, status alat medis, dan mengunduh berkas edukasi PDF tanpa batasan.
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsLockedNoticeOpen(false)}
+                className="px-6 py-2.5 bg-teal-800 hover:bg-teal-900 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                Saya Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -235,7 +235,7 @@ export const FlowchartModal: React.FC<FlowchartModalProps> = ({ isOpen, onClose 
                 <div className="relative">
                   <span className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white ring-2 ring-emerald-200" />
                   <h4 className="font-bold text-sm text-slate-900">1. Login Petugas Nakes</h4>
-                  <p className="text-slate-600 mt-0.5">Memasukkan kata sandi petugas (contoh: <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-emerald-800">123456</code>). Sistem memverifikasi kredensial dan mencatat riwayat login.</p>
+                  <p className="text-slate-600 mt-0.5">Memasukkan Username dan PIN akses resmi petugas. Sistem memverifikasi kredensial terdaftar dan mencatat riwayat sesi login.</p>
                 </div>
 
                 {/* Node N2 */}

@@ -156,10 +156,14 @@ export const EducationPdfCard: React.FC<EducationPdfCardProps> = ({
 
         {/* 2. OVERLAY TOP CONTROLS (Z-20 ABSOLUTE TOP-2 LEFT-2 RIGHT-2 FLEX JUSTIFY-BETWEEN) */}
         <div className="z-20 absolute top-2 left-2 right-2 flex justify-between items-center pointer-events-none">
-          {/* Pojok Kiri: Keterangan Posisi */}
-          <span className="bg-black/60 backdrop-blur-md text-white text-xs px-3 py-1 rounded-full font-bold shadow-md border border-white/20 flex items-center gap-1.5 pointer-events-auto">
-            {positionNumber ? `Posisi #${positionNumber}` : 'NEW'}
-          </span>
+          {/* Pojok Kiri: Keterangan Posisi (Hanya Tampil di Mode Nakes / Admin, Disembunyikan di Tampilan Orang Tua) */}
+          {isNakesAdmin ? (
+            <span className="bg-black/60 backdrop-blur-md text-white text-xs px-3 py-1 rounded-full font-bold shadow-md border border-white/20 flex items-center gap-1.5 pointer-events-auto">
+              {positionNumber ? `Posisi #${positionNumber}` : 'NEW'}
+            </span>
+          ) : (
+            <div />
+          )}
 
           {/* Pojok Kanan: Status, Icon Pindah & Icon Mata */}
           <div className="flex items-center gap-1.5 pointer-events-auto">
@@ -246,10 +250,12 @@ export const EducationPdfCard: React.FC<EducationPdfCardProps> = ({
             {subCategoryText}
           </p>
 
-          {/* Catatan Khusus / Deskripsi */}
-          <p className="text-gray-600 text-xs line-clamp-2 mt-1 leading-relaxed font-normal">
-            {shortDescription}
-          </p>
+          {/* Container Keterangan/Catatan (Ukuran Paten, Lebar Hampir Mepet & Scrollable Bersih Tanpa Scrollbar) */}
+          <div className="mt-2.5 -mx-2 sm:-mx-2.5 px-3 py-2 bg-slate-50/90 border border-slate-200/90 rounded-xl h-[62px] overflow-y-auto no-scrollbar scrollbar-none text-xs leading-relaxed text-slate-600 font-normal">
+            <p className="break-words">
+              {shortDescription}
+            </p>
+          </div>
         </div>
 
         {/* Button Unduh */}

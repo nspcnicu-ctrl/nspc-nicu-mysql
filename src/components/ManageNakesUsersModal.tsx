@@ -21,6 +21,8 @@ import {
   Key,
   Shield,
   Users,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface ManageNakesUsersModalProps {
@@ -44,6 +46,7 @@ export const ManageNakesUsersModal: React.FC<ManageNakesUsersModalProps> = ({
   const [newRoleTitle, setNewRoleTitle] = useState('Anggota');
   const [newUsername, setNewUsername] = useState('');
   const [newPin, setNewPin] = useState('');
+  const [showNewPin, setShowNewPin] = useState(false);
   const [newHasAccessRights, setNewHasAccessRights] = useState<boolean>(false);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -303,14 +306,28 @@ export const ManageNakesUsersModal: React.FC<ManageNakesUsersModalProps> = ({
                   <label className="block text-[11px] font-bold text-slate-800 mb-1">
                     PIN Login Akses * (Min 4 digit)
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={newPin}
-                    onChange={(e) => setNewPin(e.target.value)}
-                    placeholder="Min 4 angka PIN"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-mono focus:border-teal-500 outline-none"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPin ? "text" : "password"}
+                      required
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value)}
+                      placeholder="Min 4 angka PIN"
+                      className="w-full pl-3 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-mono focus:border-teal-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPin(!showNewPin)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                      title={showNewPin ? "Sembunyikan PIN" : "Lihat PIN"}
+                    >
+                      {showNewPin ? (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
 

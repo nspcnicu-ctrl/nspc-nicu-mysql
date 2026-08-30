@@ -46,12 +46,12 @@ import {
   syncNakesFromBackend,
   syncGlobalPdfsFromBackend,
 } from '../services/storage';
-import { forceSyncAllLocalToRemote } from '../services/api';
 import { SouvenirCardModal } from './SouvenirCardModal';
 import { EditPatientModal } from './EditPatientModal';
 import { PatientProgressPage } from './PatientProgressPage';
 import { GlobalEducationPage } from './GlobalEducationPage';
 import { ManageNakesUsersModal } from './ManageNakesUsersModal';
+import { ExportSpreadsheetModal } from './ExportSpreadsheetModal';
 import {
   Plus,
   Search,
@@ -73,6 +73,7 @@ import {
   Award,
   Sparkles,
   FileText,
+  FileSpreadsheet,
   AlertCircle,
   ExternalLink,
   ChevronRight,
@@ -91,6 +92,7 @@ import {
   Users,
   AlertTriangle,
   SlidersHorizontal,
+  Loader2,
 } from 'lucide-react';
 
 interface NakesAdminDashboardProps {
@@ -144,6 +146,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'aterm' | 'preterm'>('all');
   const [displayLimit, setDisplayLimit] = useState<number | 'all'>(6);
   const [isMobileDisplayFilterOpen, setIsMobileDisplayFilterOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   useEffect(() => {
@@ -236,7 +239,9 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const [deletePatientTarget, setDeletePatientTarget] = useState<Patient | null>(null);
   const [restorePatientTarget, setRestorePatientTarget] = useState<Patient | null>(null);
   const [permanentDeletePatientTarget, setPermanentDeletePatientTarget] = useState<Patient | null>(null);
+  const [isDeletingPermanent, setIsDeletingPermanent] = useState(false);
   const [isEmptyTrashModalOpen, setIsEmptyTrashModalOpen] = useState(false);
+  const [isSubmittingEmptyTrash, setIsSubmittingEmptyTrash] = useState(false);
 
   // Quick Edit Patient Modal (Foto, Identitas & Kredensial)
   const [editingPatientForModal, setEditingPatientForModal] = useState<Patient | null>(null);
@@ -369,30 +374,6 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [isForceSyncing, setIsForceSyncing] = useState(false);
-  const [forceSyncStatus, setForceSyncStatus] = useState<{ text: string; isError: boolean } | null>(null);
-
-  const handleForceSyncNow = async () => {
-    setIsForceSyncing(true);
-    setForceSyncStatus(null);
-    try {
-      const stored = getStoredPatients();
-      const allPatients = stored.length > 0 ? stored : patients;
-      const allNakes = getStoredNakesUsers();
-      const res = await forceSyncAllLocalToRemote(allPatients, allNakes);
-      setForceSyncStatus({ text: res.message, isError: !res.success });
-      if (res.success) {
-        onRefreshData();
-      }
-    } catch (err: any) {
-      setForceSyncStatus({
-        text: `Gagal sinkronisasi: ${err.message || 'Koneksi ke cPanel API gagal'}`,
-        isError: true,
-      });
-    } finally {
-      setIsForceSyncing(false);
-    }
-  };
 
   // Add Patient Form State
   const [medicalRecordNumber, setMedicalRecordNumber] = useState('');
@@ -850,18 +831,21 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   };
 
   const confirmPermanentDelete = async () => {
-    if (!permanentDeletePatientTarget) return;
+    if (!permanentDeletePatientTarget || isDeletingPermanent) return;
     const targetId = permanentDeletePatientTarget.id;
     const targetName = permanentDeletePatientTarget.babyName;
     
-    // Close modal & show feedback banner
-    setPermanentDeletePatientTarget(null);
-    setSuccessBanner(`Data pasien ${targetName} telah dihapus permanen.`);
-    setTimeout(() => setSuccessBanner(null), 4000);
-
-    // Call permanent delete API
-    await permanentlyDeletePatient(targetId);
-    onRefreshData();
+    setIsDeletingPermanent(true);
+    try {
+      // Call permanent delete API (single POST to delete_patient.php)
+      await permanentlyDeletePatient(targetId);
+      setPermanentDeletePatientTarget(null);
+      setSuccessBanner(`Data pasien ${targetName} telah dihapus permanen.`);
+      setTimeout(() => setSuccessBanner(null), 4000);
+      onRefreshData();
+    } finally {
+      setIsDeletingPermanent(false);
+    }
   };
 
   const handleEmptyTrash = () => {
@@ -883,11 +867,17 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   };
 
   const confirmEmptyTrash = async () => {
-    setIsEmptyTrashModalOpen(false);
-    setSuccessBanner(`Semua data di Filter Hapus (${overallStats.trash} pasien) berhasil dibersihkan secara permanen.`);
-    setTimeout(() => setSuccessBanner(null), 4000);
-    await emptyTrash();
-    onRefreshData();
+    if (isSubmittingEmptyTrash) return;
+    setIsSubmittingEmptyTrash(true);
+    try {
+      await emptyTrash();
+      setIsEmptyTrashModalOpen(false);
+      setSuccessBanner(`Semua data di Filter Hapus (${overallStats.trash} pasien) berhasil dibersihkan secara permanen.`);
+      setTimeout(() => setSuccessBanner(null), 4000);
+      onRefreshData();
+    } finally {
+      setIsSubmittingEmptyTrash(false);
+    }
   };
 
   const handleCopyLink = (patient: Patient) => {
@@ -1029,41 +1019,41 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     <div className="space-y-6 pb-12">
       
       {/* HEADER CONTROLS */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xs space-y-4">
-        <div className="flex flex-wrap md:flex-nowrap items-center justify-start gap-2.5 w-full">
+      <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-start gap-2 w-full">
           {onBackToHome && (
             <button
               onClick={onBackToHome}
-              className="shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200/90 rounded-full text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-2xs"
+              className="shrink-0 px-3.5 py-1.5 sm:px-4 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200/90 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
               title="Kembali ke Halaman Utama / Portal"
             >
-              <ArrowLeft className="w-4 h-4 text-slate-600 shrink-0" />
+              <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 shrink-0" />
               <span className="whitespace-nowrap">Kembali Ke Portal</span>
             </button>
           )}
 
-          <span className="hidden xl:inline-flex shrink-0 items-center gap-2 px-4 py-2 bg-teal-100/90 text-teal-900 border border-teal-300/80 rounded-full font-bold text-xs shadow-2xs">
+          <span className="hidden lg:inline-flex shrink-0 items-center gap-2 px-3.5 py-1.5 bg-teal-100/90 text-teal-900 border border-teal-300/80 rounded-full font-bold text-xs shadow-2xs">
             <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0" />
             <span className="whitespace-nowrap">Panel Admin Nakes</span>
           </span>
 
           {currentNakesUser && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 bg-emerald-50 border border-emerald-300/80 text-emerald-900 rounded-full text-xs font-bold shadow-2xs min-w-0 max-w-full truncate">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate">Petugas: {currentNakesUser.name} ({currentNakesUser.roleTitle})</span>
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0 max-w-full">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-300/80 text-emerald-900 rounded-full text-xs font-bold shadow-2xs min-w-0 max-w-full truncate">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="truncate">Petugas: {currentNakesUser.name}</span>
               </span>
 
               {currentNakesUser.isSuperAdmin || currentNakesUser.username === 'superadmin' ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-full font-black text-xs shadow-2xs">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-950 border border-amber-300 rounded-full font-black text-[11px] sm:text-xs shadow-2xs shrink-0">
                   🛡️ Super Admin
                 </span>
               ) : currentNakesUser.hasAccessRights ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-100 text-teal-900 border border-teal-300 rounded-full font-bold text-xs shadow-2xs">
-                  🛡️ Diberi Hak Akses
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-100 text-teal-900 border border-teal-300 rounded-full font-bold text-[11px] sm:text-xs shadow-2xs shrink-0">
+                  🛡️ Hak Akses
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 border border-slate-300 rounded-full font-bold text-xs shadow-2xs">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded-full font-bold text-[11px] sm:text-xs shadow-2xs shrink-0">
                   👤 Tanpa Hak Akses
                 </span>
               )}
@@ -1072,31 +1062,41 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
         </div>
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex-1">
-            <h1 className="text-2xl font-extrabold text-slate-900">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {currentNakesUser ? `Selamat Bertugas, ${currentNakesUser.name}` : 'Pengelolaan Data Pasien NICU'}
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
               Input data perkembangan harian/mingguan, foto harian, dan kelola login orang tua
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 shrink-0 w-full sm:w-auto">
+            {/* BUTTON EKSPOR DATA SPREADSHEET (EXCEL/CSV FULL DATA) */}
+            <button
+              onClick={() => setIsExportModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200/90 font-bold text-xs shadow-2xs transition-all cursor-pointer w-full sm:w-auto"
+              title="Ekspor Seluruh Rekam Medis, Antropometri & Log Harian Pasien ke Excel / Spreadsheet"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-teal-700 shrink-0" />
+              <span>Ekspor Spreadsheet Pasien</span>
+            </button>
+
             <button
               onClick={() => setIsSqlModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 font-bold text-xs shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 font-bold text-xs shadow-2xs transition-all cursor-pointer w-full sm:w-auto"
               title="Periksa Koneksi Database MySQL Niagahoster & Status Real-Time"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <Database className="w-4 h-4 text-emerald-600" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+              <Database className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>Database MySQL & Sync</span>
             </button>
 
             <button
               onClick={handleOpenAddPatient}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md shadow-teal-600/20 transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-teal-600/20 transition-all cursor-pointer w-full sm:w-auto"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
               <span>Tambah Pasien Baru</span>
             </button>
           </div>
@@ -1313,10 +1313,10 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
           </div>
 
           {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 w-full lg:w-auto overflow-x-auto">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 w-full lg:w-auto overflow-x-auto no-scrollbar scrollbar-none">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'all' ? 'bg-teal-700 text-white shadow-2xs' : 'text-slate-600 hover:bg-white'
               }`}
             >
@@ -1324,7 +1324,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('rawat')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'rawat' ? 'bg-sky-700 text-white shadow-2xs' : 'text-slate-600 hover:bg-white'
               }`}
             >
@@ -1332,7 +1332,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('siap_pulang')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'siap_pulang' ? 'bg-emerald-700 text-white shadow-2xs' : 'text-slate-600 hover:bg-white'
               }`}
             >
@@ -1340,7 +1340,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('alumni')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'alumni' ? 'bg-amber-600 text-white shadow-2xs font-extrabold' : 'text-amber-900 bg-amber-100 hover:bg-amber-200'
               }`}
             >
@@ -1348,7 +1348,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('trash')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === 'trash' ? 'bg-rose-700 text-white shadow-2xs font-extrabold' : 'text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/80'
               }`}
             >
@@ -1358,14 +1358,14 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
         </div>
 
         {/* BOTTOM ROW: GESTATION SUB-FILTER & RESET */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
-          <div className="flex flex-wrap items-center gap-2 text-slate-500 font-medium">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-slate-500 font-medium">
             <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span>Kategori Gestasi:</span>
-            <div className="flex items-center gap-1">
+            <span className="text-xs">Kategori Gestasi:</span>
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar scrollbar-none">
               <button
                 onClick={() => setCategoryFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                   categoryFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -1373,7 +1373,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
               </button>
               <button
                 onClick={() => setCategoryFilter('aterm')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                   categoryFilter === 'aterm' ? 'bg-emerald-700 text-white' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -1381,7 +1381,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
               </button>
               <button
                 onClick={() => setCategoryFilter('preterm')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                   categoryFilter === 'preterm' ? 'bg-amber-700 text-white' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -1394,7 +1394,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
           <button
             type="button"
             onClick={() => setIsMobileDisplayFilterOpen((prev) => !prev)}
-            className={`px-3.5 py-1.5 rounded-2xl border font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-2xs ${
+            className={`px-3.5 py-1.5 rounded-2xl border font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs self-stretch sm:self-auto ${
               isMobileDisplayFilterOpen
                 ? 'bg-teal-700 text-white border-teal-800 shadow-md'
                 : 'bg-teal-50 hover:bg-teal-100 text-teal-800 border-teal-200'
@@ -1589,15 +1589,15 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                 <div className="p-5 space-y-4">
                   
                     {/* Top Row: Gestational Category Badge & RM Number */}
-                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${
                         isAterm
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
                           : 'border-amber-300/90 bg-amber-50 text-amber-900'
                       }`}>
                         {isAterm ? 'Aterm (>37 Mgg) • Input Harian' : 'Preterm (<36 Mgg) • Input Mingguan'}
                       </span>
-                      <span className="text-slate-500 font-bold text-[11px] tracking-wider font-mono">
+                      <span className="text-slate-500 font-bold text-[11px] tracking-wider font-mono shrink-0">
                         {p.medicalRecordNumber || `RM-2026-${p.id.padStart(4, '0')}`}
                       </span>
                     </div>
@@ -1625,16 +1625,18 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
                       {/* Info & Status Badge */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                        <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
                           <h3
                             className="text-sm sm:text-base font-extrabold text-slate-900 hover:text-teal-700 cursor-pointer truncate leading-tight"
                             onClick={() => onSelectPatientView(p)}
                             title={p.babyName}
                           >
-                            {p.babyName.startsWith('By.') ? p.babyName : `By. Ny. ${p.motherName}`}
+                            {p.babyName.startsWith('By.') || p.babyName.startsWith('Bayi')
+                              ? p.babyName
+                              : `By. Ny. ${p.motherName.replace(/^Ny\.?\s*/i, '')}`}
                           </h3>
 
-                          {/* Status Badge matching uploaded image */}
+                          {/* Status Badge */}
                           <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 ${
                             isDeletedItem
                               ? 'bg-rose-500 text-white'
@@ -1755,19 +1757,19 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
                   {/* Account Credentials summary */}
                   <div className="p-2.5 bg-teal-50/60 rounded-2xl border border-teal-100 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between text-teal-900">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-teal-900">
                       <span className="font-bold flex items-center gap-1 text-[11px]">
                         <Key className="w-3.5 h-3.5 text-teal-600 shrink-0" /> Credentials Orang Tua
                       </span>
                       <button
                         onClick={() => { setSelectedPatient(p); setIsShareModalOpen(true); }}
-                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center gap-1 transition-all cursor-pointer"
+                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center gap-1 transition-all cursor-pointer shrink-0"
                       >
                         <Share2 className="w-3 h-3" /> Share Link
                       </button>
                     </div>
                     
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-700">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-700 pt-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span>Nick: <code className="bg-white px-1.5 py-0.5 rounded font-bold border border-teal-200 font-mono text-teal-950">{p.nickname}</code></span>
                         <span>Pass: <code className="bg-white px-1.5 py-0.5 rounded font-bold border border-teal-200 font-mono text-teal-950">{p.accessPassword}</code></span>
@@ -1808,33 +1810,33 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                   </div>
                 ) : (
                   <div className="bg-slate-50 p-3 border-t border-slate-100 space-y-2">
-                    <div className="flex items-center justify-between gap-1.5">
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => { setSelectedPatient(p); setIsSouvenirOpen(true); }}
-                        className="flex-1 px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1"
+                        className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 text-center cursor-pointer"
                         title="Cetak & Download Kartu Kenangan Kelulusan"
                       >
-                        <Award className="w-3.5 h-3.5 text-amber-700" />
-                        <span>Kartu Kenangan</span>
+                        <Award className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                        <span className="truncate">Kartu Kenangan</span>
                       </button>
 
                       {p.status === 'Sudah Pulang' ? (
                         <button
                           onClick={() => handleCancelDischargeAction(p)}
-                          className="px-3 py-1.5 bg-rose-100 hover:bg-rose-600 hover:text-white text-rose-800 text-xs font-bold rounded-xl transition-all flex items-center gap-1 border border-rose-200 cursor-pointer"
+                          className="px-2.5 py-2 bg-rose-100 hover:bg-rose-600 hover:text-white text-rose-800 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 border border-rose-200 cursor-pointer text-center"
                           title="Batalkan Status Kepulangan Pasien"
                         >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Batalkan Pulang</span>
+                          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Batalkan Pulang</span>
                         </button>
                       ) : (
                         <button
                           onClick={() => handleDischargePatientAction(p)}
-                          className="px-3 py-1.5 bg-slate-200 hover:bg-amber-500 hover:text-white text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-2 bg-slate-200 hover:bg-amber-500 hover:text-white text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer text-center"
                           title="Set Pasien Pulang"
                         >
-                          <LogOut className="w-3.5 h-3.5" />
-                          <span>Set Pulang</span>
+                          <LogOut className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Set Pulang</span>
                         </button>
                       )}
                     </div>
@@ -1859,7 +1861,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
                         <button
                           onClick={() => handleDelete(p.id, p.babyName)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer shrink-0"
                           title="Pindahkan ke Filter Hapus (Sampah)"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2748,54 +2750,6 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             </div>
 
             <div className="space-y-3 text-xs text-slate-600">
-              <div className="p-4 bg-gradient-to-r from-teal-900 to-emerald-900 text-white rounded-2xl space-y-3 shadow-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-extrabold text-sm text-teal-100 flex items-center gap-2">
-                      <span>🚀 Sinkronisasi Paksa Data ke MySQL</span>
-                    </h4>
-                    <p className="text-[11px] text-teal-200/90 mt-0.5">
-                      Kirim seluruh {patients.length} data pasien dan {getStoredNakesUsers().length} akun nakes di memori browser ini langsung ke MySQL cPanel
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleForceSyncNow}
-                    disabled={isForceSyncing}
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                  >
-                    {isForceSyncing ? (
-                      <>
-                        <span className="w-3.5 h-3.5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></span>
-                        <span>Menyinkronkan...</span>
-                      </>
-                    ) : (
-                      <>
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Kirim ke MySQL Sekarang</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {forceSyncStatus && (
-                  <div
-                    className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-                      forceSyncStatus.isError
-                        ? 'bg-rose-950/80 border border-rose-500/50 text-rose-200'
-                        : 'bg-emerald-950/80 border border-emerald-400/50 text-emerald-200'
-                    }`}
-                  >
-                    {forceSyncStatus.isError ? (
-                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                    ) : (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    )}
-                    <span>{forceSyncStatus.text}</span>
-                  </div>
-                )}
-              </div>
-
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1 font-mono">
                 <p><strong>Database Engine:</strong> <span className="text-teal-800 font-bold">MySQL 8.0+ (Niagahoster / cPanel)</span></p>
                 <p><strong>Database Name:</strong> <span className="text-sky-700 font-bold">{process.env.MYSQL_DATABASE || 'nspc_nicu_db'}</span></p>
@@ -3420,18 +3374,29 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isDeletingPermanent}
                   onClick={() => setPermanentDeletePatientTarget(null)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
+                  disabled={isDeletingPermanent}
                   onClick={confirmPermanentDelete}
-                  className="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Ya, Hapus Permanen</span>
+                  {isDeletingPermanent ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Ya, Hapus Permanen</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -3455,8 +3420,9 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
               </div>
               <button
                 type="button"
+                disabled={isSubmittingEmptyTrash}
                 onClick={() => setIsEmptyTrashModalOpen(false)}
-                className="text-white/80 hover:text-white font-bold text-lg p-1 rounded-lg hover:bg-white/10 transition-all cursor-pointer"
+                className="text-white/80 hover:text-white font-bold text-lg p-1 rounded-lg hover:bg-white/10 transition-all cursor-pointer disabled:opacity-50"
               >
                 ✕
               </button>
@@ -3483,18 +3449,29 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isSubmittingEmptyTrash}
                   onClick={() => setIsEmptyTrashModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
+                  disabled={isSubmittingEmptyTrash}
                   onClick={confirmEmptyTrash}
-                  className="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Ya, Kosongkan Sampah Sekarang</span>
+                  {isSubmittingEmptyTrash ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Mengosongkan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Ya, Kosongkan Sampah Sekarang</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -3783,6 +3760,14 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
         currentNakesUser={currentNakesUser}
         onClose={() => setIsManageUsersModalOpen(false)}
         onRefreshNakes={onRefreshData}
+      />
+
+      {/* EKSPOR DATA PASIEN SPREADSHEET MODAL */}
+      <ExportSpreadsheetModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        patients={patients}
+        filteredPatients={filteredPatients}
       />
 
     </div>

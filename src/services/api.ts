@@ -332,11 +332,14 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
   return true;
 }
 
-export async function permanentlyDeletePatientApi(patientId: string): Promise<boolean> {
+export async function permanentlyDeletePatientApi(patientId: string, medicalRecordNumber?: string): Promise<boolean> {
   const payload = {
     id: patientId,
     patient_id: patientId,
     patientId: patientId,
+    raw_id: patientId,
+    medical_record_number: medicalRecordNumber || '',
+    medicalRecordNumber: medicalRecordNumber || '',
     action: 'permanent_delete',
   };
 
@@ -362,31 +365,15 @@ export async function permanentlyDeletePatientApi(patientId: string): Promise<bo
       return true;
     }
   } catch (err) {
-    console.warn('⚠️ [API Client] permanentlyDeletePatientApi warning:', err);
+    console.warn('⚠️ [API Client] permanentlyDeletePatientApi note:', err);
   }
-
-  // Fallback to delete_patient.php with DELETE method if POST not allowed
-  try {
-    const resDel = await fetch(`${PHP_API_BASE}/delete_patient.php?id=${encodeURIComponent(patientId)}&action=permanent_delete`, {
-      method: 'DELETE',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-    const jsonDel = await resDel.json().catch(() => null);
-    if (resDel.ok && jsonDel && (jsonDel.status === 'success' || jsonDel.success === true)) {
-      return true;
-    }
-  } catch {}
 
   return true;
 }
 
-export async function deletePatientApi(patientId: string, hard = false): Promise<boolean> {
+export async function deletePatientApi(patientId: string, hard = false, medicalRecordNumber?: string): Promise<boolean> {
   if (hard) {
-    return permanentlyDeletePatientApi(patientId);
+    return permanentlyDeletePatientApi(patientId, medicalRecordNumber);
   }
   return softDeletePatientApi(patientId);
 }
@@ -492,19 +479,23 @@ export async function restorePatientApi(patientId: string): Promise<boolean> {
   return true;
 }
 
-export async function emptyTrashApi(): Promise<boolean> {
+export async function emptyTrashApi(ids?: string[], medicalRecordNumbers?: string[]): Promise<boolean> {
   const payload = {
     action: 'empty_trash',
+    ids: ids || [],
+    medical_record_numbers: medicalRecordNumbers || [],
   };
 
-  console.log('🚀 [API Client] Mengosongkan tempat sampah via delete_patient.php');
+  console.log('🚀 [API Client] Mengosongkan tempat sampah via delete_patient.php', payload);
 
-  // Primary: POST ke /api/delete_patient.php
   try {
     const res = await fetch(`${PHP_API_BASE}/delete_patient.php`, {
       method: 'POST',
       mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: JSON.stringify(payload),
     });
     const json = await res.json().catch(() => null);
@@ -512,28 +503,8 @@ export async function emptyTrashApi(): Promise<boolean> {
       return true;
     }
   } catch (err) {
-    console.warn('⚠️ [API Client] emptyTrashApi delete_patient.php note:', err);
+    console.warn('⚠️ [API Client] emptyTrashApi note:', err);
   }
-
-  // Fallback ke update_patient_status.php
-  try {
-    await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch {}
-
-  // Fallback ke patients.php
-  try {
-    await fetch(`${PHP_API_BASE}/patients.php`, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch {}
 
   return true;
 }
@@ -606,11 +577,38 @@ export async function deleteDailyLogApi(patientId: string, logId: string): Promi
 // 3. AKUN & HAK AKSES NAKES (nakes_users.php)
 // =============================================================================
 
-export async function fetchNakesUsersApi(): Promise<NakesUser[]> {
-  const url = `${PHP_API_BASE}/nakes_users.php`;
+export function getStoredNakesSession(): { role?: string; nakesUser?: NakesUser } | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = localStorage.getItem('nspc_session');
+      if (raw) return JSON.parse(raw);
+    }
+  } catch (e) {}
+  return null;
+}
+
+export function isNakesAuthenticated(): boolean {
+  const session = getStoredNakesSession();
+  return session?.role === 'nakes' && !!session?.nakesUser?.id;
+}
+
+export async function fetchNakesUsersApi(force = false): Promise<NakesUser[]> {
+  // Hanya jalankan jika nakes sudah login / terautentikasi atau jika dipanggil secara eksplisit (force)
+  if (!force && !isNakesAuthenticated()) {
+    console.log('🔒 [API Client] fetchNakesUsersApi dibatalkan otomatis (User belum login sebagai Nakes)');
+    return [];
+  }
+
+  const session = getStoredNakesSession();
+  const sessionUserId = session?.nakesUser?.id || '';
+
+  const url = `${PHP_API_BASE}/nakes_users.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
   try {
     const res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        ...(sessionUserId ? { 'X-Nakes-Auth-ID': sessionUserId } : {}),
+      },
     });
     if (!res.ok) return [];
     const json = await res.json();
@@ -714,6 +712,11 @@ export async function deleteNakesUserApi(userId: string): Promise<void> {
 // =============================================================================
 
 export async function recordNakesLoginApi(user: NakesUser): Promise<boolean> {
+  if (!user || !user.id || !user.username) {
+    console.warn('⚠️ [API Client] recordNakesLoginApi dibatalkan otomatis: kredensial user tidak valid');
+    return false;
+  }
+
   const logUrl = `${PHP_API_BASE}/nakes_login_logs.php`;
   const userUrl = `${PHP_API_BASE}/nakes_users.php`;
 
@@ -757,10 +760,22 @@ export async function recordNakesLoginApi(user: NakesUser): Promise<boolean> {
 }
 
 export async function fetchNakesLoginLogsApi(): Promise<any[]> {
-  const url = `${PHP_API_BASE}/nakes_login_logs.php`;
+  // Hanya kirim jika user sudah terautentikasi sebagai Nakes
+  if (!isNakesAuthenticated()) {
+    console.log('🔒 [API Client] fetchNakesLoginLogsApi dibatalkan otomatis (User belum login sebagai Nakes)');
+    return [];
+  }
+
+  const session = getStoredNakesSession();
+  const sessionUserId = session?.nakesUser?.id || '';
+
+  const url = `${PHP_API_BASE}/nakes_login_logs.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
   try {
     const res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        ...(sessionUserId ? { 'X-Nakes-Auth-ID': sessionUserId } : {}),
+      },
     });
     if (!res.ok) return [];
     const json = await res.json();
@@ -812,9 +827,147 @@ function updateEducationApiStatus(status: Partial<EducationApiStatus>) {
   }
 }
 
+/**
+ * Normalizer fungsi untuk memetakan kolom dari MySQL / PHP backend ke EducationPdfItem
+ */
+export function normalizeEducationPdfItem(raw: any, index = 0): EducationPdfItem {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      id: `pdf_${Date.now()}_${index}`,
+      title: 'Materi Edukasi',
+      category: 'Bayi BBLR & Prematur',
+      fileName: 'materi_edukasi.pdf',
+      fileSizeText: 'Direct Link',
+      fileDataUrl: '',
+      coverImageUrl: '',
+      pageCount: 1,
+      orderIndex: index,
+      publishedAt: new Date().toISOString(),
+      isActive: true,
+    };
+  }
+
+  const id = String(
+    raw.id || raw.pdf_id || raw.ID || raw.id_pdf || raw._id || `pdf_${Date.now()}_${index}`
+  );
+
+  const title = String(
+    raw.title || raw.judul || raw.name || raw.nama || raw.pdf_title || raw.title_id || 'Materi Edukasi'
+  ).trim();
+
+  const category = String(
+    raw.category || raw.kategori || raw.cat || raw.category_name || raw.topic || 'Bayi BBLR & Prematur'
+  ).trim() || 'Bayi BBLR & Prematur';
+
+  // Support all URL field variations
+  const rawFileUrl = String(
+    raw.fileDataUrl ||
+    raw.file_data_url ||
+    raw.file_url ||
+    raw.fileUrl ||
+    raw.url ||
+    raw.pdf_url ||
+    raw.pdfUrl ||
+    raw.document_url ||
+    raw.doc_url ||
+    raw.link ||
+    raw.link_url ||
+    ''
+  ).trim();
+
+  // Support all cover image variations
+  const rawCoverUrl = String(
+    raw.coverImageUrl ||
+    raw.cover_image_url ||
+    raw.coverUrl ||
+    raw.cover_url ||
+    raw.thumbnail_url ||
+    raw.thumbnail ||
+    raw.thumbnailUrl ||
+    raw.gambar_sampul ||
+    raw.sampul ||
+    ''
+  ).trim();
+
+  const fileName = String(
+    raw.fileName ||
+    raw.file_name ||
+    raw.filename ||
+    raw.nama_file ||
+    `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
+  ).trim();
+
+  const isDrive = rawFileUrl.includes('drive.google.com') || rawFileUrl.includes('docs.google.com');
+  const fileSizeText = String(
+    raw.fileSizeText ||
+    raw.file_size_text ||
+    raw.size ||
+    raw.file_size ||
+    (isDrive ? 'Google Drive' : (rawFileUrl.startsWith('data:') ? 'Lokal Dokumen' : 'Direct Link'))
+  ).trim();
+
+  const nakesNote = raw.nakesNote !== undefined
+    ? String(raw.nakesNote)
+    : (raw.nakes_note !== undefined
+        ? String(raw.nakes_note)
+        : (raw.catatan !== undefined
+            ? String(raw.catatan)
+            : (raw.note !== undefined
+                ? String(raw.note)
+                : (raw.notes !== undefined
+                    ? String(raw.notes)
+                    : (raw.description !== undefined
+                        ? String(raw.description)
+                        : (raw.deskripsi !== undefined ? String(raw.deskripsi) : undefined))))));
+
+  const pageCount = Number(
+    raw.pageCount || raw.page_count || raw.halaman || raw.jumlah_halaman || 1
+  ) || 1;
+
+  const orderIndex = Number(
+    raw.orderIndex !== undefined
+      ? raw.orderIndex
+      : (raw.order_index !== undefined
+          ? raw.order_index
+          : (raw.urutan !== undefined
+              ? raw.urutan
+              : (raw.order !== undefined ? raw.order : index)))
+  ) || index;
+
+  const publishedAt = String(
+    raw.publishedAt ||
+    raw.published_at ||
+    raw.created_at ||
+    raw.tanggal ||
+    raw.date ||
+    new Date().toISOString()
+  ).trim();
+
+  const isActive = raw.isActive !== undefined
+    ? Boolean(raw.isActive)
+    : (raw.is_active !== undefined
+        ? (raw.is_active == 1 || raw.is_active === true || raw.is_active === '1' || raw.is_active === 'active')
+        : (raw.status !== undefined ? raw.status !== 'inactive' && raw.status !== 'deleted' : true));
+
+  return {
+    id,
+    title,
+    category,
+    fileName,
+    fileSizeText,
+    fileDataUrl: rawFileUrl,
+    coverImageUrl: rawCoverUrl,
+    pageCount,
+    orderIndex,
+    nakesNote: nakesNote ? nakesNote.trim() : undefined,
+    publishedAt,
+    isActive,
+  };
+}
+
 export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
-  // Target URL tepat: https://chagrin.id/api/education_pdfs.php (tanpa typo, tanpa public_html)
-  const url = `${PHP_API_BASE}/education_pdfs.php`;
+  // Target URL tepat: https://chagrin.id/api/education_pdfs.php dengan default parameter action=get
+  const url = `${PHP_API_BASE}/education_pdfs.php?action=get`;
   console.log('📡 [API Client] Fetching Education PDFs from:', url);
 
   try {
@@ -830,33 +983,21 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
       });
     } catch (networkErr: any) {
       fetchError = networkErr;
-      console.warn('⚠️ [API Client] Network error saat mengakses:', url, networkErr.message);
+      console.warn('⚠️ [API Client] Network note saat mengakses:', url, networkErr?.message);
     }
 
-    // 1. Tangani jika response status bukan 200 OK (seperti 404 Not Found, 500, etc.)
+    // 1. Silent fallback jika response status bukan 200 OK
     if (!res || !res.ok) {
       const httpStatus = res ? res.status : 0;
-      const statusText = res ? res.statusText : (fetchError?.message || 'Network unreachable');
-
-      if (httpStatus === 404) {
-        console.warn(`⚠️ [API Client 404] Endpoint ${url} mengembalikan status 404 Not Found.`);
-        updateEducationApiStatus({
-          isError: true,
-          status: 404,
-          message: `Endpoint ${url} mengembalikan status 404 (Not Found). Sistem beralih ke penyimpanan lokal & modul bawaan.`,
-          endpoint: url,
-          isUsingFallback: true,
-        });
-      } else {
-        console.warn(`⚠️ [API Client Non-200] Endpoint ${url} mengembalikan status ${httpStatus} (${statusText}).`);
-        updateEducationApiStatus({
-          isError: true,
-          status: httpStatus,
-          message: `API mengembalikan status HTTP ${httpStatus}. Sistem beralih ke penyimpanan lokal & modul bawaan.`,
-          endpoint: url,
-          isUsingFallback: true,
-        });
-      }
+      console.info(`ℹ️ [API Client Fallback] Endpoint education_pdfs.php status: ${httpStatus}. Beralih senyap ke IndexedDB/LocalStorage.`);
+      
+      updateEducationApiStatus({
+        isError: false,
+        status: httpStatus,
+        message: 'Menggunakan penyimpanan lokal & modul bawaan',
+        endpoint: url,
+        isUsingFallback: true,
+      });
 
       return [];
     }
@@ -867,25 +1008,48 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
       return null;
     });
 
-    const items = json?.data?.items || json?.data || json?.items || [];
-    if (Array.isArray(items)) {
-      updateEducationApiStatus({
-        isError: false,
-        status: 200,
-        message: `Terhubung normal (${items.length} modul ditemukan)`,
-        endpoint: url,
-        isUsingFallback: false,
-      });
-      return items;
+    if (!json) return [];
+
+    // Parse array secara fleksibel sesuai instruksi:
+    // const pdfList = Array.isArray(json) ? json : (json.data || json.pdfs || json.result || []);
+    let rawList: any[] = [];
+    if (Array.isArray(json)) {
+      rawList = json;
+    } else if (json.data && Array.isArray(json.data)) {
+      rawList = json.data;
+    } else if (json.data && typeof json.data === 'object' && Array.isArray(json.data.items)) {
+      rawList = json.data.items;
+    } else if (json.data && typeof json.data === 'object' && Array.isArray(json.data.pdfs)) {
+      rawList = json.data.pdfs;
+    } else if (Array.isArray(json.pdfs)) {
+      rawList = json.pdfs;
+    } else if (Array.isArray(json.result)) {
+      rawList = json.result;
+    } else if (Array.isArray(json.results)) {
+      rawList = json.results;
+    } else if (Array.isArray(json.items)) {
+      rawList = json.items;
     }
 
-    return [];
-  } catch (err: any) {
-    console.warn('[API Client] fetchEducationPdfsApi unhandled fallback:', err);
+    const normalizedList: EducationPdfItem[] = rawList
+      .filter((item) => item !== null && item !== undefined && typeof item === 'object')
+      .map((item, idx) => normalizeEducationPdfItem(item, idx));
+
     updateEducationApiStatus({
-      isError: true,
+      isError: false,
+      status: 200,
+      message: `Terhubung normal (${normalizedList.length} modul ditemukan)`,
+      endpoint: url,
+      isUsingFallback: false,
+    });
+
+    return normalizedList;
+  } catch (err: any) {
+    console.info('ℹ️ [API Client] fetchEducationPdfsApi silent fallback:', err?.message);
+    updateEducationApiStatus({
+      isError: false,
       status: 0,
-      message: `Gagal memuat API: ${err?.message || 'Koneksi terputus'}. Menggunakan data offline lokal.`,
+      message: 'Menggunakan penyimpanan lokal & modul bawaan',
       endpoint: url,
       isUsingFallback: true,
     });

@@ -143,3 +143,34 @@ export function toggleMilestone(
     });
   }
 }
+
+/**
+ * Checks if a patient is categorized as 'Siap Pulang' or 'Alumni' (Sudah Pulang),
+ * which is the prerequisite condition for parents to print Kartu NSPC & Kartu Kenangan / Kelulusan.
+ */
+export function isPatientEligibleForPrint(patient?: {
+  status?: string;
+  milestones?: unknown;
+  dischargedAt?: string;
+} | null): boolean {
+  if (!patient) return false;
+  const statusLower = (patient.status || '').toLowerCase().trim();
+  if (
+    statusLower === 'siap pulang' ||
+    statusLower === 'sudah pulang' ||
+    statusLower === 'alumni' ||
+    statusLower.includes('siap') ||
+    statusLower.includes('alumni') ||
+    statusLower.includes('pulang')
+  ) {
+    return true;
+  }
+  if (Boolean(patient.dischargedAt)) {
+    return true;
+  }
+  if (isMilestoneChecked(patient.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) {
+    return true;
+  }
+  return false;
+}
+

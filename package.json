@@ -25,7 +25,8 @@
     "mysql2": "^3.24.2",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",

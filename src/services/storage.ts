@@ -35,17 +35,15 @@ const ADMIN_PIN_KEY = 'nspc_admin_pin_v1';
 const NAKES_USERS_KEY = 'nspc_nakes_users_v4';
 const GLOBAL_PDFS_CACHE_KEY = 'nspc_global_pdfs_cache_v2';
 
-const DUMMY_PDF_IDS = new Set(['edu_pmk_01', 'edu_asi_02', 'edu_tanda_bahaya_03', 'edu_perawatan_04']);
-
 function getInitialGlobalPdfs(): EducationPdfItem[] {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const cached = localStorage.getItem(GLOBAL_PDFS_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter((p) => p && !DUMMY_PDF_IDS.has(p.id));
-          return filtered;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter((p) => p && p.id && p.title);
+          return valid;
         }
       }
     }
@@ -239,25 +237,27 @@ export function resolvePatientEducationPdfs(patientPdfs?: EducationPdfItem[]): E
   return Array.from(map.values());
 }
 
-export async function syncGlobalPdfsFromBackend(): Promise<EducationPdfItem[]> {
+export async function syncGlobalPdfsFromBackend(force = false): Promise<EducationPdfItem[]> {
   try {
     const remotePdfs = await fetchEducationPdfsApi();
-    if (Array.isArray(remotePdfs)) {
-      const filtered = remotePdfs.filter((p) => p && !DUMMY_PDF_IDS.has(p.id));
-      MEMORY_GLOBAL_PDFS = filtered;
-      try {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.setItem(GLOBAL_PDFS_CACHE_KEY, JSON.stringify(filtered));
-        }
-      } catch (e) {}
-      window.dispatchEvent(new Event('nspc_data_changed'));
-      return filtered;
+    if (Array.isArray(remotePdfs) && (remotePdfs.length > 0 || force)) {
+      const valid = remotePdfs.filter((p) => p && p.id && p.title);
+      if (valid.length > 0 || force) {
+        MEMORY_GLOBAL_PDFS = valid;
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem(GLOBAL_PDFS_CACHE_KEY, JSON.stringify(valid));
+          }
+        } catch (e) {}
+        window.dispatchEvent(new Event('nspc_data_changed'));
+        return valid;
+      }
     }
   } catch (err) {
     console.warn('[Storage] Sync Global PDFs failed:', err);
   }
   
-  return MEMORY_GLOBAL_PDFS;
+  return getStoredGlobalPdfs();
 }
 
 // Aliases for compatibility
@@ -635,13 +635,21 @@ export function restorePatient(patientId: string): void {
 
 export async function permanentlyDeletePatient(patientId: string): Promise<void> {
   const patients = getStoredPatients();
-  const filtered = patients.filter((p) => p.id !== patientId);
+  const targetPatient = patients.find(
+    (p) => String(p.id) === String(patientId) || p.medicalRecordNumber === patientId
+  );
+  const mrn = targetPatient?.medicalRecordNumber;
+
+  // Immediately remove from in-memory state and localStorage
+  const filtered = patients.filter(
+    (p) => String(p.id) !== String(patientId) && (!mrn || p.medicalRecordNumber !== mrn)
+  );
   MEMORY_PATIENTS = filtered;
   safeSaveToLocalStorage(STORAGE_KEY, filtered);
   window.dispatchEvent(new Event('nspc_data_changed'));
 
   try {
-    await deletePatientApi(patientId, true);
+    await deletePatientApi(patientId, true, mrn);
   } catch (err) {
     console.warn('[Sync] Permanent delete background sync note:', err);
   }
@@ -651,15 +659,18 @@ export async function emptyTrash(): Promise<void> {
   const patients = getStoredPatients();
   const toDelete = patients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
   const active = patients.filter((p) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
+  
   MEMORY_PATIENTS = active;
   safeSaveToLocalStorage(STORAGE_KEY, active);
   window.dispatchEvent(new Event('nspc_data_changed'));
   
   try {
-    await emptyTrashApi();
+    const ids = toDelete.map((p) => String(p.id));
+    const mrns = toDelete.map((p) => p.medicalRecordNumber).filter(Boolean);
+    await emptyTrashApi(ids, mrns);
   } catch {
     for (const p of toDelete) {
-      await deletePatientApi(p.id, true).catch((err) => console.warn('MySQL Empty Trash error:', err));
+      await deletePatientApi(p.id, true, p.medicalRecordNumber).catch((err) => console.warn('MySQL Empty Trash error:', err));
     }
   }
 }
@@ -848,9 +859,9 @@ export function findNakesUserByCredentials(usernameInput: string, pinInput: stri
   return undefined;
 }
 
-export async function syncNakesFromBackend(): Promise<NakesUser[]> {
+export async function syncNakesFromBackend(force = false): Promise<NakesUser[]> {
   try {
-    const remoteUsers = await fetchNakesUsersApi();
+    const remoteUsers = await fetchNakesUsersApi(force);
     if (remoteUsers && remoteUsers.length > 0) {
       const localUsers = getStoredNakesUsers();
       const userMap = new Map<string, NakesUser>();

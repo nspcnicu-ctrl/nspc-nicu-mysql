@@ -31,6 +31,7 @@ import {
 import { downloadEducationPdf } from '../utils/pdfDownload';
 import { PdfViewerCanvas } from './PdfViewerCanvas';
 import { EducationPdfCard } from './EducationPdfCard';
+import { EducationLightboxModal } from './EducationLightboxModal';
 import { getEducationApiStatus, EducationApiStatus, updateEducationPdfApi } from '../services/api';
 import {
   ArrowLeft,
@@ -142,7 +143,7 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
     const loadLiveEducationPdfs = async () => {
       setIsLoadingPdfs(true);
       try {
-        const livePdfs = await syncGlobalPdfsFromBackend();
+        const livePdfs = await syncGlobalPdfsFromBackend(true);
         if (livePdfs && isMounted) {
           setStoredPdfs(livePdfs);
         }
@@ -182,21 +183,21 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const livePdfs = await syncGlobalPdfsFromBackend();
+      const livePdfs = await syncGlobalPdfsFromBackend(true);
       if (livePdfs) {
         setStoredPdfs(livePdfs);
-        setSuccessBanner('🔄 Berhasil memperbarui daftar edukasi dari MySQL Database!');
-        setTimeout(() => setSuccessBanner(null), 3000);
+        setSuccessBanner(`🔄 Sinkronisasi berhasil! Memuat ${livePdfs.length} materi edukasi dari MySQL Database.`);
+        setTimeout(() => setSuccessBanner(null), 3500);
       }
     } catch (err) {
       console.warn('[Refresh error]:', err);
     } finally {
       setIsRefreshing(false);
+      setApiStatus(getEducationApiStatus());
     }
   };
 
-  const DUMMY_PDF_IDS = new Set(['edu_pmk_01', 'edu_asi_02', 'edu_tanda_bahaya_03', 'edu_perawatan_04']);
-  const allPdfs = storedPdfs.filter((p) => p && !DUMMY_PDF_IDS.has(p.id));
+  const allPdfs = storedPdfs.filter((p) => p && p.title && p.title.trim().length > 0);
 
   // Reorder and persist layout placement
   const handleReorderPdfs = (newOrderedList: EducationPdfItem[]) => {
@@ -924,17 +925,6 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={handleManualRefresh}
-              disabled={isRefreshing}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Sinkronkan ulang data dari MySQL Database"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-teal-700 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span>{isRefreshing ? 'Menyinkronkan...' : 'Sinkron Database'}</span>
-            </button>
-
             <span className="text-xs font-bold text-slate-500">Tampilan:</span>
             <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
               <button
@@ -1342,93 +1332,12 @@ export const GlobalEducationPage: React.FC<GlobalEducationPageProps> = ({
         </div>
       )}
 
-      {/* MODAL PRATINJAU PDF (PERSIS LAYOUT SCREENSHOT SANGAT PRESISI) */}
-      {previewPdf && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-[9999] animate-fadeIn font-sans">
-          <div className="bg-white rounded-[24px] max-w-3xl w-full flex flex-col shadow-2xl overflow-hidden relative max-h-[95vh] border border-slate-100">
-            {/* 1. DARK TEAL HEADER BANNER */}
-            <div className="bg-[#005c4b] px-6 py-4 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/20 text-white flex items-center justify-center shrink-0">
-                  <FileText className="w-5 h-5 stroke-[2.2]" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-white leading-tight">
-                    {previewPdf.title}
-                  </h3>
-                  <div className="text-xs text-emerald-100 font-medium mt-0.5">
-                    Kategori: {previewPdf.category} &bull; {previewPdf.publishedAt}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setPreviewPdf(null)}
-                className="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
-                title="Tutup Pratinjau"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* 2. MODAL BODY (CARD INFO + PDF VIEWER) */}
-            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 bg-white">
-              {/* TOP LIGHT GRAY INFO BOX */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2 text-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 font-mono">
-                  <span>Nama Berkas: <strong className="text-slate-700">{previewPdf.fileName}</strong></span>
-                  <span>Ukuran: <strong className="text-slate-700">{previewPdf.fileSizeText}</strong></span>
-                </div>
-
-                <div className="border-t border-slate-200/80 my-2 pt-2">
-                  <div className="text-xs font-black text-teal-800">
-                    Catatan Khusus Nakes:
-                  </div>
-                  <div className="text-xs italic text-slate-700 font-medium mt-0.5">
-                    "{previewPdf.nakesNote || 'Harap pelajari petunjuk dalam modul ini dengan seksama.'}"
-                  </div>
-                </div>
-              </div>
-
-              {/* Native PDF / Google Drive Iframe Viewer */}
-              <PdfViewerCanvas
-                dataUrl={previewPdf.fileDataUrl || getPdfDataUrlSync(previewPdf.id)}
-                title={previewPdf.title}
-                fileName={previewPdf.fileName}
-                nakesNote={previewPdf.nakesNote}
-                onDownload={() => handleDownloadPdf(previewPdf)}
-              />
-            </div>
-
-            {/* 3. MODAL FOOTER */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-              <div className="text-xs font-medium text-slate-500">
-                Sistem Informasi Rekam Medis NSPC &bull; RSUD Undata
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setPreviewPdf(null)}
-                  className="px-5 py-2.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 font-extrabold text-xs rounded-2xl transition-all cursor-pointer"
-                >
-                  Tutup
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPdf(previewPdf)}
-                  className="px-5 py-2.5 bg-[#005c4b] hover:bg-[#004a3c] text-white font-extrabold text-xs rounded-2xl transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <Download className="w-4 h-4 text-emerald-300" />
-                  <span>Unduh PDF</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL PRATINJAU LANGSUNG GAMBAR / DOKUMEN TANPA BINGKAI */}
+      <EducationLightboxModal
+        pdf={previewPdf}
+        onClose={() => setPreviewPdf(null)}
+        onDownload={(pdf) => handleDownloadPdf(pdf)}
+      />
 
       {/* POP UP CONFIRMATION MODAL UNTUK IKON SAMPAH */}
       {deleteModal.isOpen && (

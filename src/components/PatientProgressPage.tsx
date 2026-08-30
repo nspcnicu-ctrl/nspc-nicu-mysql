@@ -6,6 +6,7 @@ import { saveGlobalPdf, deleteStoredGlobalPdf, resolvePatientEducationPdfs } fro
 import { renderPdfFirstPageToImage, generateFallbackPdfCover, generateSamplePdfDataUrl } from '../services/pdfRender';
 import { PdfViewerCanvas } from './PdfViewerCanvas';
 import { EducationPdfCard } from './EducationPdfCard';
+import { EducationLightboxModal } from './EducationLightboxModal';
 import { downloadEducationPdf } from '../utils/pdfDownload';
 import {
   normalizeMilestones,
@@ -890,59 +891,69 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
           </div>
         )}
 
-        {/* 1. TOP HEADER BAR (Sticky Top for Easy Access during input progress) */}
-        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-4 sm:p-5 border border-slate-200/90 shadow-md flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 sticky top-2 z-30">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <button
-              onClick={onBack}
-              className="p-2.5 bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-slate-600 rounded-2xl transition-all cursor-pointer shrink-0 mt-1 sm:mt-0"
-              title="Kembali ke Daftar Pasien"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
+        {/* 1. TOP HEADER BAR */}
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/90 shadow-md flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3.5 min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-3.5">
+              <button
+                onClick={onBack}
+                className="p-2 sm:p-2.5 bg-slate-100 hover:bg-teal-50 hover:text-teal-700 text-slate-600 rounded-2xl transition-all cursor-pointer shrink-0"
+                title="Kembali ke Daftar Pasien"
+              >
+                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
 
-            {/* Baby Avatar */}
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 p-0.5 shadow-sm shrink-0 overflow-hidden">
-              {patient.coverPhotoUrl ? (
-                <img src={patient.coverPhotoUrl} alt={patient.babyName} className="w-full h-full object-cover rounded-[14px]" />
-              ) : (
-                <div className="w-full h-full bg-teal-50 rounded-[14px] flex items-center justify-center">
-                  <Baby className="w-8 h-8 text-teal-600" />
-                </div>
-              )}
+              {/* Baby Avatar */}
+              <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 p-0.5 shadow-sm shrink-0 overflow-hidden">
+                {patient.coverPhotoUrl ? (
+                  <img src={patient.coverPhotoUrl} alt={patient.babyName} className="w-full h-full object-cover rounded-[14px]" />
+                ) : (
+                  <div className="w-full h-full bg-teal-50 rounded-[14px] flex items-center justify-center">
+                    <Baby className="w-6 h-6 sm:w-8 sm:h-8 text-teal-600" />
+                  </div>
+                )}
+              </div>
+
+              {/* Small screen Baby Name & RM */}
+              <div className="sm:hidden min-w-0 flex-1">
+                <h1 className="text-base font-black text-slate-900 leading-tight truncate">{patient.babyName}</h1>
+                <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-bold rounded-md font-mono mt-0.5">
+                  {medicalRecordNo}
+                </span>
+              </div>
             </div>
 
             {/* Baby Details */}
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 leading-none">{patient.babyName}</h1>
-                <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-lg font-mono">
+            <div className="space-y-1 min-w-0 flex-1">
+              <div className="hidden sm:flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h1 className="text-lg sm:text-2xl font-black text-slate-900 leading-tight">{patient.babyName}</h1>
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 text-[11px] sm:text-xs font-bold rounded-lg font-mono shrink-0">
                   {medicalRecordNo}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-slate-600 font-medium flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium flex-wrap">
                 <span>Orang Tua: <strong className="text-slate-800 font-semibold">{patient.motherName} & {patient.fatherName}</strong></span>
-                <span className="text-slate-300">•</span>
-                <span className="text-teal-700 font-medium">📍 {roomInfo}</span>
+                <span className="text-slate-300 hidden sm:inline">•</span>
+                <span className="text-teal-700 font-medium whitespace-nowrap">📍 {roomInfo}</span>
               </div>
 
-              <div className="flex items-center gap-2 pt-0.5 flex-wrap">
-                <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold rounded-full flex items-center gap-1">
+              <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] sm:text-[11px] font-bold rounded-full flex items-center gap-1 shrink-0">
                   <Check className="w-3 h-3" /> Status Portal Ortu: STABIL
                 </span>
                 {patient.milestones.bayiSementaraPemantauanKetat && (
-                  <span className="px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-bold rounded-full">
+                  <span className="px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 text-[10px] sm:text-[11px] font-bold rounded-full shrink-0">
                     ⚠️ PEMANTAUAN KETAT
                   </span>
                 )}
                 {patient.milestones.bolehPulang && patient.status !== 'Sudah Pulang' && (
-                  <span className="px-2.5 py-0.5 bg-emerald-600 text-white font-extrabold text-[11px] rounded-full shadow-xs animate-pulse">
+                  <span className="px-2.5 py-0.5 bg-emerald-600 text-white font-extrabold text-[10px] sm:text-[11px] rounded-full shadow-xs animate-pulse shrink-0">
                     🎉 SIAP & BOLEH PULANG
                   </span>
                 )}
                 {patient.status === 'Sudah Pulang' && (
-                  <span className="px-2.5 py-0.5 bg-amber-600 text-white font-extrabold text-[11px] rounded-full">
+                  <span className="px-2.5 py-0.5 bg-amber-600 text-white font-extrabold text-[10px] sm:text-[11px] rounded-full shrink-0">
                     🎓 ALUMNI NICU
                   </span>
                 )}
@@ -951,23 +962,23 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
           </div>
 
           {/* Action Buttons Right */}
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:flex items-center gap-2 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => onOpenCredentials(patient)}
-              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer w-full sm:w-auto"
             >
-              <Key className="w-4 h-4 text-emerald-600" />
-              <span>Link Ortu & Pass</span>
+              <Key className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
+              <span className="whitespace-nowrap">Link Ortu & Pass</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsSouvenirModalOpen(true)}
-              className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer w-full sm:w-auto"
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Neo Smart Progress Card</span>
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 shrink-0" />
+              <span className="whitespace-nowrap">Neo Smart Progress Card</span>
             </button>
 
             {patient.status === 'Sudah Pulang' ? (
@@ -975,20 +986,20 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                 <button
                   type="button"
                   onClick={() => onCancelDischargePatient(patient)}
-                  className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer w-full sm:w-auto"
                 >
-                  <RotateCcwIcon className="w-4 h-4" />
-                  <span>Batalkan Pulang</span>
+                  <RotateCcwIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                  <span className="whitespace-nowrap">Batalkan Pulang</span>
                 </button>
               )
             ) : (
               <button
                 type="button"
                 onClick={() => setIsDischargeModalOpen(true)}
-                className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer w-full sm:w-auto"
               >
-                <LogOut className="w-4 h-4 text-rose-600" />
-                <span>Set Pulang (Alumni)</span>
+                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600 shrink-0" />
+                <span className="whitespace-nowrap">Set Pulang (Alumni)</span>
               </button>
             )}
           </div>
@@ -1416,18 +1427,18 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
 
                 {/* MILESTONE CHIPS SELECTOR FOR THIS LOG */}
                 <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5 text-xs">
-                  <div className="font-bold text-slate-800 flex items-center justify-between">
+                  <div className="font-bold text-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                     <div className="flex items-center gap-1.5 text-teal-800">
-                      <Award className="w-4 h-4 text-teal-600" />
-                      <span className="font-extrabold text-sm">Tag Milestone Log Perkembangan Ini</span>
+                      <Award className="w-4 h-4 text-teal-600 shrink-0" />
+                      <span className="font-extrabold text-xs sm:text-sm">Tag Milestone Log Perkembangan Ini</span>
                     </div>
-                    <span className="text-[11px] text-slate-500 font-normal">Tampil sebagai Badge di Riwayat Log</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-500 font-normal">Tampil sebagai Badge di Riwayat Log</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {logMilestonesChips.map((m, idx) => (
                       <span key={idx} className="px-2.5 py-1 bg-teal-100 text-teal-900 border border-teal-300 rounded-lg font-bold flex items-center gap-1.5 shadow-2xs">
-                        <Check className="w-3.5 h-3.5 text-teal-700" />
+                        <Check className="w-3.5 h-3.5 text-teal-700 shrink-0" />
                         <span>{m}</span>
                         <button
                           type="button"
@@ -1451,7 +1462,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                           onClick={() => setLogMilestonesChips([...logMilestonesChips, preset])}
                           className="px-2 py-0.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-200 hover:border-teal-300 rounded-lg text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
                         >
-                          <Plus className="w-3 h-3 text-teal-600" />
+                          <Plus className="w-3 h-3 text-teal-600 shrink-0" />
                           <span>{preset}</span>
                         </button>
                       ))}
@@ -1459,7 +1470,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                   </div>
 
                   {/* Custom milestone input */}
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                     <input
                       type="text"
                       value={customMilestoneInput}
@@ -1473,8 +1484,8 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                           }
                         }
                       }}
-                      placeholder="Tambah milestone kustom (contoh: Responsif terhadap sentuhan Mama)..."
-                      className="flex-1 p-2 bg-white border border-slate-200 rounded-xl font-medium text-xs"
+                      placeholder="Tambah milestone kustom..."
+                      className="w-full sm:flex-1 p-2 bg-white border border-slate-200 rounded-xl font-medium text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
                     />
                     <button
                       type="button"
@@ -1484,7 +1495,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                           setCustomMilestoneInput('');
                         }
                       }}
-                      className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                      className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer transition-all shrink-0 shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Tambah Tag</span>
@@ -1950,7 +1961,7 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
               {/* Search, Filter Status, and View Toggle */}
               <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-3 border-t border-slate-100">
                 {/* Search Input */}
-                <div className="relative flex-1 max-w-md">
+                <div className="relative w-full lg:max-w-md">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
@@ -1961,13 +1972,13 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center gap-3 flex-wrap justify-between lg:justify-end">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 justify-between lg:justify-end w-full lg:w-auto">
                   {/* Status Filter (Semua, Tampil di Ortu, Sembunyi) */}
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
+                  <div className="flex items-center justify-between sm:justify-start gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/60 text-xs font-bold overflow-x-auto no-scrollbar scrollbar-none">
                     <button
                       type="button"
                       onClick={() => setPdfFilter('all')}
-                      className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      className={`px-2.5 sm:px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap text-[11px] sm:text-xs shrink-0 ${
                         pdfFilter === 'all'
                           ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
                           : 'text-slate-600 hover:text-slate-900'
@@ -1978,58 +1989,58 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                     <button
                       type="button"
                       onClick={() => setPdfFilter('active')}
-                      className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      className={`px-2.5 sm:px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap text-[11px] sm:text-xs shrink-0 ${
                         pdfFilter === 'active'
                           ? 'bg-white text-emerald-800 shadow-2xs font-extrabold'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                       <span>Tampil ({activePdfsCount})</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPdfFilter('inactive')}
-                      className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      className={`px-2.5 sm:px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap text-[11px] sm:text-xs shrink-0 ${
                         pdfFilter === 'inactive'
                           ? 'bg-white text-rose-800 shadow-2xs font-extrabold'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
                       <span>Sembunyi ({inactivePdfsCount})</span>
                     </button>
                   </div>
 
                   {/* View Mode Toggle: Galeri Grid vs Daftar Nomor */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between sm:justify-start gap-2">
                     <span className="text-xs font-bold text-slate-500">Tampilan:</span>
                     <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => setPdfViewMode('grid')}
-                        className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
                           pdfViewMode === 'grid'
                             ? 'bg-white text-teal-800 shadow-2xs font-extrabold'
                             : 'text-slate-500 hover:text-slate-800'
                         }`}
                         title="Tampilan Galeri Grid"
                       >
-                        <Grid className="w-3.5 h-3.5" />
+                        <Grid className="w-3.5 h-3.5 shrink-0" />
                         <span>Galeri Grid</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setPdfViewMode('list')}
-                        className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
                           pdfViewMode === 'list'
                             ? 'bg-white text-teal-800 shadow-2xs font-extrabold'
                             : 'text-slate-500 hover:text-slate-800'
                         }`}
                         title="Tampilan Daftar Nomor"
                       >
-                        <List className="w-3.5 h-3.5" />
+                        <List className="w-3.5 h-3.5 shrink-0" />
                         <span>Daftar Nomor</span>
                       </button>
                     </div>
@@ -2044,8 +2055,8 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
                 Tidak ada dokumen PDF edukasi yang cocok dengan pencarian atau filter ini.
               </div>
             ) : pdfViewMode === 'grid' ? (
-              /* GRID GALLERY VIEW (MATCHING IMAGE SCREENSHOT) */
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              /* GRID GALLERY VIEW (5 COLUMNS ON DESKTOP) */
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4.5 sm:gap-5">
                 {filteredPdfs.map((pdf, index) => {
                   const coverImg =
                     pdfRenderedCovers[pdf.id] ||
@@ -2179,102 +2190,12 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
               </div>
             )}
 
-            {/* PREVIEW MODAL FOR NAKES PROGRESS VIEW */}
-            {previewPdfItem && (
-              <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-[9999] animate-fadeIn font-sans">
-                <div className="bg-white rounded-[24px] max-w-3xl w-full flex flex-col shadow-2xl overflow-hidden relative max-h-[95vh] border border-slate-100">
-                  {/* Dark Teal Header Banner */}
-                  <div className="bg-[#005c4b] px-6 py-4 text-white flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20">
-                        <FileText className="w-5 h-5 text-emerald-300" />
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-extrabold tracking-wider text-emerald-200 uppercase">
-                          PRATINJAU MODUL EDUKASI &bull; NAKES VIEW
-                        </div>
-                        <h3 className="text-base sm:text-lg font-black text-white line-clamp-1">
-                          {previewPdfItem.title}
-                        </h3>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setPreviewPdfItem(null)}
-                      className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Body Content */}
-                  <div className="p-5 sm:p-6 overflow-y-auto space-y-4">
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-2">
-                      <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
-                        <span className="font-bold text-slate-700">
-                          Kategori: <strong className="text-teal-800 font-extrabold">{previewPdfItem.category}</strong>
-                        </span>
-                        <span className="text-slate-500 font-medium">
-                          Diterbitkan: <strong>{previewPdfItem.publishedAt}</strong>
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-xs text-slate-600 pt-1">
-                        <span>Nama Berkas: <strong className="text-slate-800">{previewPdfItem.fileName}</strong></span>
-                        <span>Ukuran: <strong className="text-slate-800">{previewPdfItem.fileSizeText}</strong></span>
-                      </div>
-
-                      {previewPdfItem.nakesNote && (
-                        <div className="border-t border-slate-200/80 my-2 pt-2">
-                          <div className="text-xs font-black text-teal-800">
-                            Catatan Khusus Nakes:
-                          </div>
-                          <div className="text-xs italic text-slate-700 font-medium mt-0.5">
-                            "{previewPdfItem.nakesNote}"
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Native PDF / Google Drive Iframe Viewer */}
-                    <PdfViewerCanvas
-                      dataUrl={previewPdfItem.fileDataUrl || getPdfDataUrlSync(previewPdfItem.id)}
-                      title={previewPdfItem.title}
-                      fileName={previewPdfItem.fileName}
-                      nakesNote={previewPdfItem.nakesNote}
-                      onDownload={() => handleDownloadPdf(previewPdfItem)}
-                    />
-                  </div>
-
-                  {/* Footer */}
-                  <div className="px-6 py-4 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-3 shrink-0">
-                    <div className="text-xs font-medium text-slate-500">
-                      Sistem Informasi Rekam Medis NSPC &bull; RSUD Undata
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewPdfItem(null)}
-                        className="px-5 py-2.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 font-extrabold text-xs rounded-2xl transition-all cursor-pointer"
-                      >
-                        Tutup
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadPdf(previewPdfItem)}
-                        className="px-5 py-2.5 bg-[#005c4b] hover:bg-[#004a3c] text-white font-extrabold text-xs rounded-2xl transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-                      >
-                        <Download className="w-4 h-4 text-emerald-300" />
-                        <span>Unduh PDF</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* PREVIEW MODAL FOR NAKES PROGRESS VIEW (DIRECT LIGHTBOX) */}
+            <EducationLightboxModal
+              pdf={previewPdfItem}
+              onClose={() => setPreviewPdfItem(null)}
+              onDownload={(pdf) => handleDownloadPdf(pdf)}
+            />
           </div>
         )}
 

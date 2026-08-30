@@ -7,6 +7,7 @@ import { generateSamplePdfDataUrl, renderPdfFirstPageToImage, generateFallbackPd
 import { getEducationApiStatus, EducationApiStatus } from '../services/api';
 import { EducationPdfCard } from './EducationPdfCard';
 import { PdfViewerCanvas } from './PdfViewerCanvas';
+import { EducationLightboxModal } from './EducationLightboxModal';
 import {
   ArrowLeft,
   BookOpen,
@@ -566,7 +567,7 @@ export const ParentEducationPage: React.FC<ParentEducationPageProps> = ({
             </button>
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4.5 sm:gap-5">
             {filteredPdfs.map((pdf, index) => {
               const coverImage = renderedCovers[pdf.id] || pdf.coverImageUrl || generateFallbackPdfCover(pdf.title, pdf.category);
               return (
@@ -654,88 +655,12 @@ export const ParentEducationPage: React.FC<ParentEducationPageProps> = ({
         )}
       </div>
 
-      {/* MODAL PRATINJAU (PREVIEW MODAL MAX-W-4XL WITH BACKDROP-BLUR) */}
-      {previewPdfModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/70 backdrop-blur-md animate-fadeIn font-sans">
-          <div className="bg-white w-full max-w-4xl rounded-[28px] shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh] relative">
-            {/* Modal Header */}
-            <div className="p-5 sm:p-6 bg-[#005c4b] text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-white/15 text-white flex items-center justify-center shrink-0 shadow-inner">
-                  <FileText className="w-6 h-6 stroke-[2.2]" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-white line-clamp-1">
-                    {previewPdfModal.title}
-                  </h3>
-                  <p className="text-xs text-emerald-100 font-medium">
-                    Kategori: {previewPdfModal.category || 'Umum'} • {previewPdfModal.publishedAt || previewPdfModal.createdAt || '12 Agt 2026'}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setPreviewPdfModal(null)}
-                className="w-9 h-9 rounded-full bg-white/15 hover:bg-white/30 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
-                title="Tutup Pratinjau"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Sub-header: File Info & Nakes Notes */}
-            <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
-              <div className="flex items-center gap-3 text-slate-600 font-mono text-xs">
-                <span>Nama Berkas: <strong className="text-slate-900 font-bold">{previewPdfModal.fileName}</strong></span>
-                <span>•</span>
-                <span>Ukuran: <strong className="text-slate-900 font-bold">{previewPdfModal.fileSizeText || previewPdfModal.fileSize || '1.2 MB'}</strong></span>
-              </div>
-
-              {(previewPdfModal.nakesNote || (previewPdfModal as any).nakesNotes) && (
-                <div className="text-xs text-teal-900 font-medium bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-100 italic">
-                  <strong className="not-italic font-bold text-teal-800">Catatan Nakes:</strong> "{previewPdfModal.nakesNote || (previewPdfModal as any).nakesNotes}"
-                </div>
-              )}
-            </div>
-
-            {/* Native PDF / Google Drive Iframe Viewer */}
-            <PdfViewerCanvas
-              dataUrl={previewPdfModal.fileDataUrl || getPdfDataUrlSync(previewPdfModal.id)}
-              title={previewPdfModal.title}
-              fileName={previewPdfModal.fileName}
-              nakesNote={previewPdfModal.nakesNote || (previewPdfModal as any).nakesNotes}
-              onDownload={() => downloadEducationPdf(previewPdfModal)}
-            />
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 bg-white border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-              <span className="text-xs font-medium text-slate-500">
-                Sistem Informasi Rekam Medis NSPC • RSUD Undata Palu
-              </span>
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setPreviewPdfModal(null)}
-                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs rounded-2xl transition-all cursor-pointer border border-slate-200"
-                >
-                  Tutup
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    downloadEducationPdf(previewPdfModal);
-                  }}
-                  className="px-6 py-2.5 bg-[#005c4b] hover:bg-[#004a3c] text-white font-extrabold text-xs rounded-2xl transition-all flex items-center gap-2 cursor-pointer shadow-md"
-                >
-                  <Download className="w-4 h-4 text-emerald-300" />
-                  <span>Unduh PDF</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL PRATINJAU LANGSUNG GAMBAR / DOKUMEN TANPA BINGKAI */}
+      <EducationLightboxModal
+        pdf={previewPdfModal}
+        onClose={() => setPreviewPdfModal(null)}
+        onDownload={(pdf) => downloadEducationPdf(pdf)}
+      />
 
       {/* MODAL UNGGAH MATERI EDUKASI BARU (CONVERT & UPLOAD) */}
       {showUploadModal && (

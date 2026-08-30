@@ -23,6 +23,7 @@ import { ParentDashboard } from './components/ParentDashboard';
 import { NakesAdminDashboard } from './components/NakesAdminDashboard';
 import { NspcCardPrint } from './components/NspcCardPrint';
 import { EditNakesProfileModal } from './components/EditNakesProfileModal';
+import { isPatientEligibleForPrint } from './utils/milestones';
 import {
   Heart,
   Stethoscope,
@@ -39,6 +40,12 @@ import {
   ChevronRight,
   Activity,
   Award,
+  BookOpen,
+  Milk,
+  AlertTriangle,
+  Droplets,
+  HeartHandshake,
+  Info,
 } from 'lucide-react';
 
 export default function App() {
@@ -217,7 +224,11 @@ export default function App() {
         {currentRole === 'parent' && currentPatient && (
           <ParentDashboard
             patient={currentPatient}
-            onOpenPrintModal={() => setIsPrintModalOpen(true)}
+            onOpenPrintModal={() => {
+              if (isPatientEligibleForPrint(currentPatient)) {
+                setIsPrintModalOpen(true);
+              }
+            }}
             onShareLink={() => setIsQuickShareOpen(true)}
             onBackToNakes={currentNakesUser ? () => { setCurrentRole('nakes'); setCurrentPatient(null); } : undefined}
             onBackToHome={handleLogout}
@@ -249,39 +260,39 @@ export default function App() {
           <div className="space-y-8 py-6 max-w-5xl mx-auto">
             
             {/* HERO PORTAL CARD */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-800 via-teal-900 to-emerald-950 text-white p-8 sm:p-12 shadow-2xl">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-800 via-teal-900 to-emerald-950 text-white p-6 sm:p-8 md:p-12 shadow-2xl">
               <div className="absolute right-0 top-0 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
               
               <div className="relative z-10 max-w-2xl space-y-4">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-teal-200 text-xs font-semibold border border-white/15">
-                  <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
-                  <span>RSUD Undata Provinsi Sulawesi Tengah</span>
+                  <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400 shrink-0" />
+                  <span className="truncate">RSUD Undata Provinsi Sulawesi Tengah</span>
                 </div>
 
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
+                <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
                   NSPC <span className="text-teal-300">NICU</span> RSUD Undata
                 </h1>
 
-                <p className="text-teal-100/90 text-sm sm:text-base leading-relaxed font-normal">
+                <p className="text-teal-100/90 text-xs sm:text-sm md:text-base leading-relaxed font-normal">
                   <strong>Neo Smart Progress Card</strong> — Aplikasi pemantau perkembangan harian & mingguan bayi di ruang NICU RSUD Undata Palu. Dirancang khusus untuk memfasilitasi keterbukaan informasi perkembangan kesehatan buah hati kepada Ayah dan Bunda.
                 </p>
 
-                <div className="pt-4 flex flex-wrap items-center gap-3">
+                <div className="pt-2 sm:pt-4 grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3">
                   <button
                     onClick={() => handleOpenLogin('parent')}
-                    className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-400 hover:bg-teal-300 text-teal-950 font-extrabold text-sm shadow-lg shadow-teal-400/20 transition-all transform hover:-translate-y-0.5 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl sm:rounded-2xl bg-teal-400 hover:bg-teal-300 text-teal-950 font-extrabold text-xs sm:text-sm shadow-md shadow-teal-400/20 transition-all transform hover:-translate-y-0.5 cursor-pointer w-full sm:w-auto"
                   >
-                    <Heart className="w-4 h-4 text-teal-900 fill-teal-900" />
-                    <span>Masuk Akses Orang Tua</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-900 fill-teal-900 shrink-0" />
+                    <span className="whitespace-nowrap">Masuk Akses Orang Tua</span>
+                    <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                   </button>
 
                   <button
                     onClick={() => handleOpenLogin('nakes')}
-                    className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm border border-white/20 transition-all cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl sm:rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer w-full sm:w-auto backdrop-blur-xs"
                   >
-                    <Stethoscope className="w-4 h-4 text-teal-300" />
-                    <span>Portal Tenaga Kesehatan (Nakes)</span>
+                    <Stethoscope className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-300 shrink-0" />
+                    <span className="whitespace-nowrap">Portal Tenaga Kesehatan (Nakes)</span>
                   </button>
                 </div>
               </div>
@@ -322,50 +333,111 @@ export default function App() {
 
             </div>
 
-            {/* DEMO PATIENTS QUICK ACCESS SECTION */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-slate-900 text-base">
-                    Coba Langsung Contoh Pasien
+            {/* EDUKASI NEONATUS & PERAWATAN BAYI NICU RSUD UNDATA */}
+            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-50 text-teal-700 text-xs font-bold border border-teal-100">
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Pojok Edukasi & Informasi NICU</span>
+                  </div>
+                  <h3 className="font-extrabold text-slate-900 text-lg sm:text-xl">
+                    Panduan Perawatan & Tumbuh Kembang Buah Hati
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    Pilih contoh pasien di bawah untuk langsung mencoba tampilan kartu orang tua
+                  <p className="text-xs sm:text-sm text-slate-500 max-w-2xl">
+                    Informasi klinis penting yang disusun oleh tim dokter spesialis anak & perawat NICU RSUD Undata untuk mendampingi Ayah dan Bunda selama masa perawatan.
                   </p>
                 </div>
-                <span className="px-3 py-1 bg-teal-50 text-teal-700 text-xs font-bold rounded-full border border-teal-100">
-                  Contoh Pasien
-                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenLogin('parent')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                  >
+                    <span>Masuk Pantau Bayi</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                {patients.slice(0, 1).map((p) => (
-                  <div
-                    key={p.id}
-                    onClick={() => handleSuccessParentLogin(p)}
-                    className="p-4 rounded-2xl bg-slate-50 hover:bg-teal-50/80 border border-slate-200/80 hover:border-teal-200 cursor-pointer transition-all flex items-center justify-between group"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 text-sm group-hover:text-teal-900">
-                          {p.babyName}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          p.gestationCategory === 'aterm' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {p.gestationCategory === 'aterm' ? 'Aterm (>37m)' : 'Preterm (<36m)'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        Bunda {p.motherName} • Nick: <code className="bg-slate-200/80 px-1 rounded text-slate-800 font-bold">{p.nickname}</code> • Pass: <code className="bg-slate-200/80 px-1 rounded text-slate-800 font-bold">{p.accessPassword}</code>
-                      </p>
-                    </div>
-
-                    <div className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-teal-600 group-hover:bg-teal-600 group-hover:text-white transition-all shrink-0">
-                      <ChevronRight className="w-4 h-4" />
-                    </div>
+              {/* 4 CARDS EDUKASI */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                {/* Edukasi 1: Metode Kanguru (KMC) */}
+                <div className="p-5 rounded-2xl bg-gradient-to-b from-rose-50/60 to-rose-50/20 border border-rose-100/80 space-y-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+                    <HeartHandshake className="w-5 h-5" />
                   </div>
-                ))}
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">Metode Kanguru (KMC)</h4>
+                    <span className="text-[11px] font-semibold text-rose-700">Kontak Kulit ke Kulit</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Menstabilkan suhu tubuh bayi (mencegah hipotermia), mempercepat kenaikan berat badan, dan mempererat ikatan batin (bonding) antara orang tua dan buah hati.
+                  </p>
+                </div>
+
+                {/* Edukasi 2: Nutrisi ASI Eksklusif */}
+                <div className="p-5 rounded-2xl bg-gradient-to-b from-teal-50/60 to-teal-50/20 border border-teal-100/80 space-y-3">
+                  <div className="w-10 h-10 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
+                    <Milk className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">ASI & Kolostrum Emas</h4>
+                    <span className="text-[11px] font-semibold text-teal-700">Nutrisi & Imun Alami</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Tetesan kolostrum pertama kaya akan antibodi (IgA sekretori) yang melindungi saluran cerna bayi prematur dari infeksi berat seperti NEC.
+                  </p>
+                </div>
+
+                {/* Edukasi 3: Pencegahan Infeksi */}
+                <div className="p-5 rounded-2xl bg-gradient-to-b from-blue-50/60 to-blue-50/20 border border-blue-100/80 space-y-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <Droplets className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">Kebersihan & Cuci Tangan</h4>
+                    <span className="text-[11px] font-semibold text-blue-700">Protokol Pencegahan Infeksi</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Lakukan 6 langkah cuci tangan dengan sabun/antiseptik sebelum dan sesudah menyentuh bayi di inkubator untuk memutus rantai kuman patogen.
+                  </p>
+                </div>
+
+                {/* Edukasi 4: Deteksi Tanda Bahaya */}
+                <div className="p-5 rounded-2xl bg-gradient-to-b from-amber-50/60 to-amber-50/20 border border-amber-100/80 space-y-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">Kenali Tanda Bahaya</h4>
+                    <span className="text-[11px] font-semibold text-amber-700">Deteksi Dini Neonatus</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Segera laporkan bila bayi bernapas cepat/sesak (retraksi dinding dada), merintih, suhu tubuh di bawah 36.5°C, atau malas menyusu.
+                  </p>
+                </div>
+
+              </div>
+
+              {/* Edukasi Banner Bawah */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-600">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center shrink-0">
+                    <Info className="w-4 h-4" />
+                  </div>
+                  <p>
+                    <strong>Akses Khusus Pasien:</strong> Akun kartu perkembangan anak dibuatkan langsung oleh petugas Nakes NICU saat proses rawat inap untuk menjamin kerahasiaan rekam medis.
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleOpenLogin('nakes')}
+                  className="text-teal-700 hover:text-teal-900 font-bold whitespace-nowrap inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Stethoscope className="w-3.5 h-3.5" />
+                  <span>Portal Petugas NICU</span>
+                </button>
               </div>
             </div>
 

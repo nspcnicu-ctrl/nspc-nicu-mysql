@@ -22,6 +22,13 @@ import {
   CheckCircle2,
   BadgeCheck,
   Loader2,
+  BookOpen,
+  Info,
+  HeartHandshake,
+  FileText,
+  Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface LoginModalProps {
@@ -56,11 +63,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Parent state
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
+  const [showParentPassword, setShowParentPassword] = useState(false);
   const [parentError, setParentError] = useState('');
 
   // Nakes Login state
   const [nakesUsername, setNakesUsername] = useState('');
   const [adminPin, setAdminPinInput] = useState('');
+  const [showNakesPin, setShowNakesPin] = useState(false);
   const [nakesError, setNakesError] = useState('');
 
   // Nakes Register state
@@ -162,7 +171,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     // If not found, try refreshing from MySQL Database
     setIsVerifying(true);
     try {
-      const remoteUsers = await syncNakesFromBackend();
+      const remoteUsers = await syncNakesFromBackend(true);
       const cleanUserLower = cleanUser.toLowerCase();
       const remoteMatch = remoteUsers.find(
         (u) => (cleanUserLower ? u.username.toLowerCase() === cleanUserLower : true) && u.pin === cleanPin
@@ -313,14 +322,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   Password Akses
                 </label>
                 <div className="relative">
-                  <Key className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <Key className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
-                    type="password"
+                    type={showParentPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Password dari Petugas"
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
+                    className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all font-mono"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowParentPassword(!showParentPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 focus:outline-none p-1 rounded-md transition-colors cursor-pointer"
+                    title={showParentPassword ? "Sembunyikan Password" : "Lihat Password"}
+                  >
+                    {showParentPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
               </div>
 
@@ -342,40 +363,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 )}
               </button>
 
-              {/* DEMO QUICK PREFILL FOR PARENTS - TAMPILKAN 1 CONTOH PASIEN TERDAFTAR */}
-              {allPatients.length > 0 && (
-                <div className="pt-3 border-t border-slate-100">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Coba Akses Contoh Pasien:
-                  </p>
-                  <div className="space-y-1.5">
-                    {allPatients.slice(0, 1).map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => handleQuickPrefillParent(p)}
-                        className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-teal-50/70 border border-slate-200/60 transition-all flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <span className="font-semibold text-slate-800 block">
-                            {p.babyName} ({p.gestationCategory === 'aterm' ? 'Aterm' : 'Preterm'})
-                          </span>
-                          <span className="text-[11px] text-slate-500">
-                            Nick: <code className="bg-slate-200/80 px-1 rounded text-slate-700">{p.nickname}</code> • Pass: <code className="bg-slate-200/80 px-1 rounded text-slate-700">{p.accessPassword}</code>
-                          </span>
-                        </div>
-                        <span className="text-[11px] font-medium text-teal-600 underline shrink-0 ml-2">Pilih</span>
-                      </button>
-                    ))}
+              {/* PANDUAN & EDUKASI AKSES ORANG TUA */}
+              <div className="pt-4 border-t border-slate-100 space-y-2">
+                <div className="flex items-center gap-1.5 text-teal-800 font-bold text-xs">
+                  <BookOpen className="w-3.5 h-3.5 text-teal-600" />
+                  <span>Informasi & Panduan Akses:</span>
+                </div>
+                <div className="p-3 bg-teal-50/60 border border-teal-100 rounded-2xl space-y-1.5 text-[11px] text-teal-950">
+                  <div className="flex items-start gap-1.5">
+                    <HeartHandshake className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                    <span><strong>Kredensial Resmi:</strong> Nickname & Password diberikan oleh perawat/dokter NICU saat bayi pertama kali didaftarkan.</span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                    <span><strong>Pembaruan Berkala:</strong> Data tanda vital, berat badan, minum, dan alat aktif diperbarui secara rutin oleh tim Nakes.</span>
                   </div>
                 </div>
-              )}
+              </div>
             </form>
           ) : (
             /* NAKES ADMIN SECTION WITH SUB-TABS */
             <div className="space-y-4">
               
-              {/* SUB-VIEW: LOGIN NAKES (Pendaftaran Publik Ditiadakan demi Keamanan) */}
+              {/* SUB-VIEW: LOGIN NAKES */}
               <form onSubmit={handleNakesLoginSubmit} className="space-y-3.5">
                 <div className="text-center mb-2">
                   <div className="w-10 h-10 bg-teal-50 text-teal-700 rounded-2xl flex items-center justify-center mx-auto mb-1.5 border border-teal-100">
@@ -397,11 +407,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 )}
 
                 {/* INFO BANNER REGISTRATION NOT PUBLIC */}
-                <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-2xl text-[11px] text-amber-900 flex items-start gap-2 leading-relaxed">
-                  <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-[11px] text-slate-700 flex items-start gap-2 leading-relaxed">
+                  <Lock className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold block text-amber-950 mb-0.5">Pendaftaran Publik Ditiadakan:</span>
-                    Pembuatan akun Nakes baru dikelola internal oleh <strong>Super Admin</strong> atau Nakes yang <strong>Diberi Hak Akses</strong> melalui Dashboard Admin.
+                    <span className="font-bold block text-slate-900 mb-0.5">Akses Khusus Tenaga Medis:</span>
+                    Halaman ini dikhususkan bagi dokter dan perawat Ruang NICU RSUD Undata untuk mengelola data rekam medis pasien.
                   </div>
                 </div>
 
@@ -415,7 +425,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       type="text"
                       value={nakesUsername}
                       onChange={(e) => setNakesUsername(e.target.value)}
-                      placeholder="Contoh: superadmin atau hasni"
+                      placeholder="Masukkan Username / NIP"
                       className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
                     />
                   </div>
@@ -423,17 +433,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    PIN Akses Nakes (Required)
+                    PIN Akses Nakes (Wajib)
                   </label>
                   <div className="relative">
-                    <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                    <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
-                      type="password"
+                      type={showNakesPin ? "text" : "password"}
                       value={adminPin}
                       onChange={(e) => setAdminPinInput(e.target.value)}
                       placeholder="Masukkan PIN Akses Nakes Anda"
-                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all font-mono"
+                      className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all font-mono"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowNakesPin(!showNakesPin)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 focus:outline-none p-1 rounded-md transition-colors cursor-pointer"
+                      title={showNakesPin ? "Sembunyikan PIN" : "Lihat PIN"}
+                    >
+                      {showNakesPin ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -455,60 +477,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   )}
                 </button>
 
-                {/* LIST REGISTERED NAKES USERS - HANYA TAMPILKAN 1 AKUN ADMIN */}
-                {(() => {
-                  const adminAccounts = nakesList.filter(
-                    (u) => u.isSuperAdmin || u.username === 'superadmin' || u.accountType === 'Super Admin' || u.name.toLowerCase().includes('admin')
-                  );
-                  const displayAdminList = adminAccounts.length > 0 ? adminAccounts.slice(0, 1) : nakesList.slice(0, 1);
-
-                  if (displayAdminList.length === 0) return null;
-
-                  return (
-                    <div className="pt-3 border-t border-slate-100 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                          Daftar Akun Nakes Terdaftar:
-                        </span>
-                        <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-100">
-                          1 Akun Admin
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        {displayAdminList.map((u) => {
-                          const isSuper = u.isSuperAdmin || u.username === 'superadmin';
-                          return (
-                            <div
-                              key={u.id}
-                              onClick={() => handleSelectNakesUser(u)}
-                              className="p-2.5 rounded-xl bg-slate-50 hover:bg-teal-50/80 border border-slate-200/70 hover:border-teal-300 cursor-pointer transition-all flex items-center justify-between group"
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-bold text-slate-800 text-xs truncate group-hover:text-teal-900">
-                                    {u.name}
-                                  </span>
-                                  {isSuper && (
-                                    <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[9px] font-extrabold">
-                                      Super Admin
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {u.roleTitle} • Username: <code className="bg-slate-200 px-1 rounded font-bold text-slate-800">{u.username}</code> • PIN: <code className="bg-slate-200 px-1 rounded font-bold text-slate-800">{u.pin}</code>
-                                </p>
-                              </div>
-                              <span className="text-[10px] font-bold text-teal-700 bg-white border border-teal-200 px-2 py-1 rounded-lg shrink-0 group-hover:bg-teal-700 group-hover:text-white transition-all">
-                                Pilih
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
+                {/* EDUKASI KEAMANAN REKAM MEDIS & PROSEDUR NAKES */}
+                <div className="pt-3 border-t border-slate-100 space-y-2">
+                  <div className="flex items-center gap-1.5 text-slate-700 font-bold text-xs">
+                    <FileText className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Integritas Rekam Medis & Privasi:</span>
+                  </div>
+                  <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5 text-[11px] text-slate-600">
+                    <div className="flex items-start gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                      <span>Jaga kerahasiaan PIN pribadi Anda dan pastikan selalu logout setelah selesai melakukan pencatatan klinis.</span>
                     </div>
-                  );
-                })()}
+                    <div className="flex items-start gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <span>Butuh pembuatan akun petugas baru atau lupa PIN? Silakan hubungi <strong>Super Admin / PJ NICU RSUD Undata</strong>.</span>
+                    </div>
+                  </div>
+                </div>
 
                 </form>
             </div>
