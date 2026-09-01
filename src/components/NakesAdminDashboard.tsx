@@ -52,6 +52,7 @@ import { PatientProgressPage } from './PatientProgressPage';
 import { GlobalEducationPage } from './GlobalEducationPage';
 import { ManageNakesUsersModal } from './ManageNakesUsersModal';
 import { ExportSpreadsheetModal } from './ExportSpreadsheetModal';
+import { DatabaseSyncModal } from './DatabaseSyncModal';
 import {
   Plus,
   Search,
@@ -86,6 +87,7 @@ import {
   CheckCircle2,
   LogOut,
   RotateCcw,
+  RefreshCw,
   ArrowLeft,
   Building2,
   GraduationCap,
@@ -1564,13 +1566,60 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
       {/* PATIENT LIST CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredPatients.length === 0 ? (
-          <div className="col-span-full p-8 text-center bg-white rounded-3xl border border-slate-100 space-y-2">
-            <p className="text-sm font-bold text-slate-600">
-              {statusFilter === 'trash' ? 'Tidak ada data pasien yang dihapus.' : 'Tidak ada data pasien yang sesuai filter.'}
-            </p>
-            <p className="text-xs text-slate-400">
-              {statusFilter === 'trash' ? 'Data yang Anda hapus dari daftar pasien akan muncul di sini.' : 'Coba ubah kata kunci pencarian atau reset filter.'}
-            </p>
+          <div className="col-span-full p-8 sm:p-12 text-center bg-white rounded-3xl border border-slate-100 space-y-4 shadow-xs">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center text-2xl font-bold">
+              👶🏻
+            </div>
+            <div className="space-y-1">
+              <p className="text-base font-extrabold text-slate-800">
+                {statusFilter === 'trash'
+                  ? 'Tidak ada data pasien yang dihapus.'
+                  : patients.length === 0
+                  ? 'Belum ada data pasien di sistem.'
+                  : 'Tidak ada data pasien yang sesuai filter.'}
+              </p>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                {statusFilter === 'trash'
+                  ? 'Data yang Anda hapus dari daftar pasien akan muncul di sini.'
+                  : patients.length === 0
+                  ? 'Belum ada data pasien tersimpan di sistem web. Anda dapat menyinkronkan langsung dari database real MySQL atau menambahkan pasien baru.'
+                  : 'Coba ubah kata kunci pencarian atau reset filter status.'}
+              </p>
+            </div>
+
+            {patients.length === 0 ? (
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSqlModalOpen(true)}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Tarik & Sinkronkan Data dari Database Real</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAddPatient}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Pasien Baru</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('');
+                  setStatusFilter('all');
+                  setCategoryFilter('all');
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Semua Filter</span>
+              </button>
+            )}
           </div>
         ) : (
           displayedPatients.map((p) => {
@@ -3768,6 +3817,13 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
         onClose={() => setIsExportModalOpen(false)}
         patients={patients}
         filteredPatients={filteredPatients}
+      />
+
+      {/* DATABASE MYSQL & REAL-TIME SYNC MODAL */}
+      <DatabaseSyncModal
+        isOpen={isSqlModalOpen}
+        onClose={() => setIsSqlModalOpen(false)}
+        onSyncComplete={onRefreshData}
       />
 
     </div>

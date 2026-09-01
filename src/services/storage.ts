@@ -270,9 +270,42 @@ export const syncGlobalPdfsFromSupabase = syncGlobalPdfsFromBackend;
 export const ONE_MINUTE_MS = 1 * 60 * 1000;
 export const THREE_DAYS_MS = ONE_MINUTE_MS;
 
+const PERMANENTLY_DELETED_KEY = 'nspc_permanently_deleted_ids';
+
+export function getPermanentlyDeletedIds(): Set<string> {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const data = localStorage.getItem(PERMANENTLY_DELETED_KEY);
+      if (data) {
+        const arr = JSON.parse(data);
+        if (Array.isArray(arr)) {
+          return new Set(arr.map((id) => String(id).trim().toLowerCase()).filter(Boolean));
+        }
+      }
+    }
+  } catch (e) {}
+  return new Set<string>();
+}
+
+export function recordPermanentlyDeletedIds(ids: (string | undefined | null)[]): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const existing = getPermanentlyDeletedIds();
+      ids.forEach((id) => {
+        if (id) {
+          existing.add(String(id).trim().toLowerCase());
+        }
+      });
+      localStorage.setItem(PERMANENTLY_DELETED_KEY, JSON.stringify(Array.from(existing)));
+    }
+  } catch (e) {}
+}
+
 let MEMORY_PATIENTS: Patient[] = [];
 
 export function getStoredPatients(): Patient[] {
+  const deletedIds = getPermanentlyDeletedIds();
+
   const normalizePatient = (p: any): Patient => {
     const logs = Array.isArray(p.progressLogs)
       ? p.progressLogs
@@ -303,33 +336,48 @@ export function getStoredPatients(): Patient[] {
     };
   };
 
+  const isNotPermanentlyDeleted = (p: any) => {
+    if (!p) return false;
+    const pId = String(p.id || '').trim().toLowerCase();
+    const mrn = String(p.medicalRecordNumber || p.medical_record_number || '').trim().toLowerCase();
+    const nick = String(p.nickname || '').trim().toLowerCase();
+    if (pId && deletedIds.has(pId)) return false;
+    if (mrn && deletedIds.has(mrn)) return false;
+    if (nick && deletedIds.has(nick)) return false;
+    return true;
+  };
+
   if (MEMORY_PATIENTS && MEMORY_PATIENTS.length > 0) {
-    return MEMORY_PATIENTS.map(normalizePatient);
+    const filtered = MEMORY_PATIENTS.filter(isNotPermanentlyDeleted);
+    return filtered.map(normalizePatient);
   }
 
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    if (data) {
-      let list: Patient[] = JSON.parse(data);
+    if (data !== null) {
+      const list: Patient[] = JSON.parse(data);
       if (Array.isArray(list)) {
-        list = list
-          .filter(
-            (p) =>
-              p &&
-              p.id &&
-              p.id !== 'p1-fitriani' &&
-              p.id !== 'p2-rahmawati' &&
-              p.id !== 'patient-default-01' &&
-              !p.id.startsWith('dummy-')
-          )
+        const validList = list
+          .filter((p) => p && p.id && (p.babyName || p.nickname) && isNotPermanentlyDeleted(p))
           .map(normalizePatient);
-        MEMORY_PATIENTS = list;
-        return [...list];
+        MEMORY_PATIENTS = validList;
+        return [...validList];
       }
     }
   } catch (err) {
     console.error('Error loading patients from storage:', err);
   }
+
+  // Fallback to initial patients if empty
+  if (INITIAL_PATIENTS && INITIAL_PATIENTS.length > 0) {
+    const filtered = INITIAL_PATIENTS.filter(isNotPermanentlyDeleted);
+    MEMORY_PATIENTS = [...filtered];
+    try {
+      safeSaveToLocalStorage(STORAGE_KEY, filtered);
+    } catch (e) {}
+    return MEMORY_PATIENTS.map(normalizePatient);
+  }
+
   return [];
 }
 
@@ -404,20 +452,28 @@ function safeSaveToLocalStorage(key: string, patients: Patient[]): void {
  * Real-time Bidirectional Synchronization: Sync data directly from Hostinger MySQL backend
  */
 export async function syncFromBackend(): Promise<Patient[]> {
+  const deletedIds = getPermanentlyDeletedIds();
   try {
     // Include soft-deleted patients so Trash tab and Active tabs both remain accurately in sync with MySQL
     const remotePatients = await fetchPatientsApi(true);
     if (remotePatients && Array.isArray(remotePatients)) {
-      // Filter out any corrupted or blank entries
+      // Filter out any corrupted, blank, or permanently deleted entries
       const validRemote = remotePatients.filter(
-        (p) => p && typeof p === 'object' && p.id && (p.babyName || p.nickname)
+        (p) => {
+          if (!p || typeof p !== 'object' || !p.id || (!p.babyName && !p.nickname)) return false;
+          const pId = String(p.id).trim().toLowerCase();
+          const mrn = String(p.medicalRecordNumber || (p as any).medical_record_number || '').trim().toLowerCase();
+          const nick = String(p.nickname || '').trim().toLowerCase();
+          if (pId && deletedIds.has(pId)) return false;
+          if (mrn && deletedIds.has(mrn)) return false;
+          if (nick && deletedIds.has(nick)) return false;
+          return true;
+        }
       );
-      if (validRemote.length > 0) {
-        MEMORY_PATIENTS = validRemote;
-        safeSaveToLocalStorage(STORAGE_KEY, validRemote);
-        window.dispatchEvent(new Event('nspc_data_changed'));
-        return validRemote;
-      }
+      MEMORY_PATIENTS = validRemote;
+      safeSaveToLocalStorage(STORAGE_KEY, validRemote);
+      window.dispatchEvent(new Event('nspc_data_changed'));
+      return validRemote;
     }
   } catch (err) {
     console.warn('[Storage] Sync from backend warning (using cache):', err);
@@ -429,8 +485,20 @@ export async function syncFromBackend(): Promise<Patient[]> {
 export const syncFromSupabase = syncFromBackend;
 
 export function savePatients(patients: Patient[]): void {
+  const deletedIds = getPermanentlyDeletedIds();
+  const filtered = patients.filter((p) => {
+    if (!p) return false;
+    const pId = String(p.id || '').trim().toLowerCase();
+    const mrn = String(p.medicalRecordNumber || (p as any).medical_record_number || '').trim().toLowerCase();
+    const nick = String(p.nickname || '').trim().toLowerCase();
+    if (pId && deletedIds.has(pId)) return false;
+    if (mrn && deletedIds.has(mrn)) return false;
+    if (nick && deletedIds.has(nick)) return false;
+    return true;
+  });
+
   try {
-    safeSaveToLocalStorage(STORAGE_KEY, patients);
+    safeSaveToLocalStorage(STORAGE_KEY, filtered);
   } catch (err) {
     console.error('Error saving patients to storage:', err);
   }
@@ -438,7 +506,7 @@ export function savePatients(patients: Patient[]): void {
   window.dispatchEvent(new Event('nspc_data_changed'));
 
   // Background sync to MySQL
-  bulkSyncPatientsApi(patients).catch((err) =>
+  bulkSyncPatientsApi(filtered).catch((err) =>
     console.warn('Background MySQL Sync Error:', err)
   );
 }
@@ -639,6 +707,10 @@ export async function permanentlyDeletePatient(patientId: string): Promise<void>
     (p) => String(p.id) === String(patientId) || p.medicalRecordNumber === patientId
   );
   const mrn = targetPatient?.medicalRecordNumber;
+  const nickname = targetPatient?.nickname;
+
+  // Record into permanently deleted set so background fetches will never re-add it
+  recordPermanentlyDeletedIds([patientId, mrn, nickname]);
 
   // Immediately remove from in-memory state and localStorage
   const filtered = patients.filter(
@@ -660,13 +732,22 @@ export async function emptyTrash(): Promise<void> {
   const toDelete = patients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
   const active = patients.filter((p) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
   
+  // Record all trashed IDs, MRNs, and nicknames into permanently deleted set
+  const trashedIdentifiers: string[] = [];
+  toDelete.forEach((p) => {
+    if (p.id) trashedIdentifiers.push(String(p.id));
+    if (p.medicalRecordNumber) trashedIdentifiers.push(p.medicalRecordNumber);
+    if (p.nickname) trashedIdentifiers.push(p.nickname);
+  });
+  recordPermanentlyDeletedIds(trashedIdentifiers);
+
   MEMORY_PATIENTS = active;
   safeSaveToLocalStorage(STORAGE_KEY, active);
   window.dispatchEvent(new Event('nspc_data_changed'));
   
   try {
     const ids = toDelete.map((p) => String(p.id));
-    const mrns = toDelete.map((p) => p.medicalRecordNumber).filter(Boolean);
+    const mrns = toDelete.map((p) => p.medicalRecordNumber).filter(Boolean) as string[];
     await emptyTrashApi(ids, mrns);
   } catch {
     for (const p of toDelete) {

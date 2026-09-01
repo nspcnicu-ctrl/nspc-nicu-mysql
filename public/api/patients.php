@@ -163,19 +163,26 @@ try {
         $input = json_decode($raw, true) ?: [];
         $pid = trim((string)($_GET['id'] ?? ($input['id'] ?? ($input['patient_id'] ?? ($input['patientId'] ?? '')))));
         $action = strtolower(trim((string)($_GET['action'] ?? ($input['action'] ?? 'permanent_delete'))));
+        $mrn = trim((string)($_GET['mrn'] ?? ($input['medical_record_number'] ?? ($input['medicalRecordNumber'] ?? ($input['mrn'] ?? '')))));
 
         // A. Kosongkan Sampah via DELETE
-        if ($action === 'empty_trash' || $action === 'clear_trash' || empty($pid)) {
+        if ($action === 'empty_trash' || $action === 'clear_trash' || (empty($pid) && empty($mrn))) {
             if ($action === 'empty_trash' || $action === 'clear_trash') {
                 try {
-                    $delLogs = $pdo->prepare("
+                    $pdo->exec("
                         DELETE FROM `daily_logs` 
                         WHERE `patient_id` IN (
                             SELECT `id` FROM `patients` 
                             WHERE `is_deleted` = 1 OR `status` = 'deleted' OR `status` = 'Disembunyikan'
                         )
                     ");
-                    $delLogs->execute();
+                    $pdo->exec("
+                        DELETE FROM `education_pdfs` 
+                        WHERE `patient_id` IN (
+                            SELECT `id` FROM `patients` 
+                            WHERE `is_deleted` = 1 OR `status` = 'deleted' OR `status` = 'Disembunyikan'
+                        )
+                    ");
                 } catch (Throwable $e) {}
 
                 $sql = "DELETE FROM `patients` WHERE `is_deleted` = 1 OR `status` = 'deleted' OR `status` = 'Disembunyikan'";
@@ -195,17 +202,31 @@ try {
             }
         }
 
-        if (empty($pid)) {
-            throw new Exception('ID pasien wajib disertakan untuk penghapusan permanen.');
+        if (empty($pid) && empty($mrn)) {
+            throw new Exception('ID pasien atau No. RM wajib disertakan untuk penghapusan permanen.');
         }
 
         try {
-            $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id");
-            $delLogs->execute([':id' => $pid]);
+            if (!empty($mrn)) {
+                $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id OR `patient_id` = :mrn");
+                $delLogs->execute([':id' => $pid, ':mrn' => $mrn]);
+                $delPdf = $pdo->prepare("DELETE FROM `education_pdfs` WHERE `patient_id` = :id OR `patient_id` = :mrn");
+                $delPdf->execute([':id' => $pid, ':mrn' => $mrn]);
+            } else {
+                $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id");
+                $delLogs->execute([':id' => $pid]);
+                $delPdf = $pdo->prepare("DELETE FROM `education_pdfs` WHERE `patient_id` = :id");
+                $delPdf->execute([':id' => $pid]);
+            }
         } catch (Throwable $e) {}
 
-        $delPatient = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id");
-        $delPatient->execute([':id' => $pid]);
+        if (!empty($mrn)) {
+            $delPatient = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id OR `medical_record_number` = :mrn");
+            $delPatient->execute([':id' => $pid, ':mrn' => $mrn]);
+        } else {
+            $delPatient = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id");
+            $delPatient->execute([':id' => $pid]);
+        }
 
         while (ob_get_level() > 0) ob_end_clean();
         http_response_code(200);
@@ -505,16 +526,31 @@ try {
 
         // C. Hard Delete
         if ($action === 'permanent_delete' || $action === 'hard_delete') {
-            if (empty($pid)) {
-                throw new Exception('ID pasien wajib diisi untuk hapus permanen.');
+            $mrn = trim((string)($_GET['mrn'] ?? ($input['medical_record_number'] ?? ($input['medicalRecordNumber'] ?? ($input['mrn'] ?? '')))));
+            if (empty($pid) && empty($mrn)) {
+                throw new Exception('ID pasien atau No. RM wajib diisi untuk hapus permanen.');
             }
             try {
-                $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id");
-                $delLogs->execute([':id' => $pid]);
+                if (!empty($mrn)) {
+                    $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id OR `patient_id` = :mrn");
+                    $delLogs->execute([':id' => $pid, ':mrn' => $mrn]);
+                    $delPdf = $pdo->prepare("DELETE FROM `education_pdfs` WHERE `patient_id` = :id OR `patient_id` = :mrn");
+                    $delPdf->execute([':id' => $pid, ':mrn' => $mrn]);
+                } else {
+                    $delLogs = $pdo->prepare("DELETE FROM `daily_logs` WHERE `patient_id` = :id");
+                    $delLogs->execute([':id' => $pid]);
+                    $delPdf = $pdo->prepare("DELETE FROM `education_pdfs` WHERE `patient_id` = :id");
+                    $delPdf->execute([':id' => $pid]);
+                }
             } catch (Throwable $e) {}
 
-            $delP = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id");
-            $delP->execute([':id' => $pid]);
+            if (!empty($mrn)) {
+                $delP = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id OR `medical_record_number` = :mrn");
+                $delP->execute([':id' => $pid, ':mrn' => $mrn]);
+            } else {
+                $delP = $pdo->prepare("DELETE FROM `patients` WHERE `id` = :id");
+                $delP->execute([':id' => $pid]);
+            }
 
             while (ob_get_level() > 0) ob_end_clean();
             http_response_code(200);

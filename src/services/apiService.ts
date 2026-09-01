@@ -5,7 +5,10 @@
 
 import { Patient, DailyLog, NakesUser, EducationPdfItem } from '../types';
 
-export const API_BASE_URL = 'https://chagrin.id/api';
+export const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+    ? (import.meta.env.VITE_API_URL as string).replace(/\/$/, '')
+    : '/api';
 
 /**
  * Standard API Response Structure from PHP

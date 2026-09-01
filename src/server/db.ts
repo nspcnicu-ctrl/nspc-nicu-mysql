@@ -1,25 +1,15 @@
 import mysql from 'mysql2/promise';
 import { Patient, DailyLog, NakesUser, EducationPdfItem } from '../types';
+import { INITIAL_PATIENTS } from '../data/initialPatients';
+import { INITIAL_NAKES_USERS } from '../data/initialNakes';
 
 let pool: mysql.Pool | null = null;
 let isConnected = false;
 let connectionError: string | null = null;
 
 // In-memory fallback storage in case MySQL is not reachable or not yet configured
-let memoryPatients: Patient[] = [];
-let memoryNakesUsers: NakesUser[] = [
-  {
-    id: 'nakes-superadmin-01',
-    name: 'Super Admin NICU',
-    roleTitle: 'Super Administrator',
-    accountType: 'Super Admin',
-    username: 'admin',
-    pin: '123456',
-    createdAt: new Date().toISOString(),
-    hasAccessRights: true,
-    isSuperAdmin: true,
-  }
-];
+let memoryPatients: Patient[] = [...INITIAL_PATIENTS];
+let memoryNakesUsers: NakesUser[] = [...INITIAL_NAKES_USERS];
 let memoryLoginLogs: any[] = [];
 let memoryEducationPdfs: EducationPdfItem[] = [];
 
@@ -529,12 +519,25 @@ export async function upsertPatient(patient: Patient): Promise<Patient> {
   }
 }
 
-export async function deletePatientById(patientId: string, hardDelete = false): Promise<boolean> {
+export async function deletePatientById(patientId: string, hardDelete = false, medicalRecordNumber?: string): Promise<boolean> {
+  const cleanMrn = (medicalRecordNumber || '').trim().toLowerCase();
+  const cleanId = (patientId || '').trim().toLowerCase();
+
   // Update memory
   if (hardDelete) {
-    memoryPatients = memoryPatients.filter((p) => p.id !== patientId);
+    memoryPatients = memoryPatients.filter((p) => {
+      const pId = String(p.id).trim().toLowerCase();
+      const pMrn = String(p.medicalRecordNumber || '').trim().toLowerCase();
+      if (cleanId && pId === cleanId) return false;
+      if (cleanMrn && pMrn === cleanMrn) return false;
+      return true;
+    });
   } else {
-    const idx = memoryPatients.findIndex((p) => p.id === patientId);
+    const idx = memoryPatients.findIndex((p) => {
+      const pId = String(p.id).trim().toLowerCase();
+      const pMrn = String(p.medicalRecordNumber || '').trim().toLowerCase();
+      return (cleanId && pId === cleanId) || (cleanMrn && pMrn === cleanMrn);
+    });
     if (idx >= 0) {
       memoryPatients[idx].isDeleted = true;
       memoryPatients[idx].deletedAt = new Date().toISOString();
@@ -546,13 +549,27 @@ export async function deletePatientById(patientId: string, hardDelete = false): 
 
   try {
     if (hardDelete) {
-      // ON DELETE CASCADE will automatically clean daily_logs and education_pdfs
-      await pool.query('DELETE FROM `patients` WHERE `id` = ?', [patientId]);
+      if (medicalRecordNumber) {
+        await pool.query('DELETE FROM `daily_logs` WHERE `patient_id` = ? OR `patient_id` = ?', [patientId, medicalRecordNumber]);
+        await pool.query('DELETE FROM `education_pdfs` WHERE `patient_id` = ? OR `patient_id` = ?', [patientId, medicalRecordNumber]);
+        await pool.query('DELETE FROM `patients` WHERE `id` = ? OR `medical_record_number` = ?', [patientId, medicalRecordNumber]);
+      } else {
+        await pool.query('DELETE FROM `daily_logs` WHERE `patient_id` = ?', [patientId]);
+        await pool.query('DELETE FROM `education_pdfs` WHERE `patient_id` = ?', [patientId]);
+        await pool.query('DELETE FROM `patients` WHERE `id` = ?', [patientId]);
+      }
     } else {
-      await pool.query(
-        'UPDATE `patients` SET `is_deleted` = 1, `status` = \'deleted\', `deleted_at` = NOW(), `updated_at` = NOW() WHERE `id` = ?',
-        [patientId]
-      );
+      if (medicalRecordNumber) {
+        await pool.query(
+          'UPDATE `patients` SET `is_deleted` = 1, `status` = \'deleted\', `deleted_at` = NOW(), `updated_at` = NOW() WHERE `id` = ? OR `medical_record_number` = ?',
+          [patientId, medicalRecordNumber]
+        );
+      } else {
+        await pool.query(
+          'UPDATE `patients` SET `is_deleted` = 1, `status` = \'deleted\', `deleted_at` = NOW(), `updated_at` = NOW() WHERE `id` = ?',
+          [patientId]
+        );
+      }
     }
     return true;
   } catch (err: any) {

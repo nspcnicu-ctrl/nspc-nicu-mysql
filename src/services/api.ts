@@ -3,10 +3,26 @@ import { Patient, DailyLog, NakesUser, EducationPdfItem } from '../types';
 /**
  * REST API Client for MySQL Backend at chagrin.id / external server
  */
-export const PHP_API_BASE =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
-    ? (import.meta.env.VITE_API_URL as string).replace(/\/$/, '')
-    : 'https://chagrin.id/api';
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const custom = localStorage.getItem('nspc_custom_api_url');
+    if (custom && custom.trim()) {
+      return custom.trim().replace(/\/$/, '');
+    }
+  }
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
+    return (import.meta.env.VITE_API_URL as string).replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    if (host.includes('chagrin.id')) {
+      return `${window.location.origin}/api`;
+    }
+  }
+  return '/api';
+}
+
+export const PHP_API_BASE = getApiBaseUrl();
 
 /**
  * Helper to map MySQL Row (snake_case + JSON strings) to TypeScript Patient (camelCase)
@@ -212,42 +228,91 @@ export function mapPatientToPayload(patient: Patient) {
 }
 
 export async function fetchPatientsApi(includeDeleted = false): Promise<Patient[]> {
+  const parseResponse = (json: any): Patient[] => {
+    let rows: any[] = [];
+    if (Array.isArray(json)) {
+      rows = json;
+    } else if (json && typeof json === 'object') {
+      if (Array.isArray(json.data)) {
+        rows = json.data;
+      } else if (json.data && Array.isArray(json.data.patients)) {
+        rows = json.data.patients;
+      } else if (json.data && Array.isArray(json.data.items)) {
+        rows = json.data.items;
+      } else if (Array.isArray(json.patients)) {
+        rows = json.patients;
+      } else if (Array.isArray(json.items)) {
+        rows = json.items;
+      }
+    }
+    const patients = rows.filter((r) => r && typeof r === 'object').map(mapRowToPatient);
+    if (!includeDeleted) {
+      return patients.filter((p: Patient) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
+    }
+    return patients;
+  };
+
+  const baseUrl = getApiBaseUrl();
+  const url = includeDeleted
+    ? `${baseUrl}/patients.php?include_deleted=1`
+    : `${baseUrl}/patients.php`;
+
   try {
-    const url = includeDeleted
-      ? `${PHP_API_BASE}/patients.php?include_deleted=1`
-      : `${PHP_API_BASE}/patients.php`;
     const res = await fetch(url, {
       method: 'GET',
       mode: 'cors',
       headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
     });
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const json = await res.json();
-    const rows = json.data?.patients || json.data?.items || (Array.isArray(json.data) ? json.data : []) || [];
-    const patients = rows.map(mapRowToPatient);
-
-    // If active list is requested, ensure no soft-deleted or hidden records leak in
-    if (!includeDeleted) {
-      return patients.filter((p: Patient) => !p.isDeleted && p.status !== 'deleted' && p.status !== 'Disembunyikan');
+    if (res.ok) {
+      const json = await res.json();
+      const patients = parseResponse(json);
+      if (patients && patients.length > 0) {
+        return patients;
+      }
     }
-    return patients;
   } catch (err) {
-    console.warn('[API Client] fetchPatientsApi note:', err);
-    throw err;
+    console.warn('[API Client] Primary fetchPatientsApi note:', err);
   }
+
+  // Fallback to https://chagrin.id/api if primary URL is local /api and returned no patients
+  if (baseUrl === '/api' && typeof window !== 'undefined' && !window.location.hostname.includes('chagrin.id')) {
+    try {
+      const fallbackUrl = includeDeleted
+        ? `https://chagrin.id/api/patients.php?include_deleted=1`
+        : `https://chagrin.id/api/patients.php`;
+      const fallbackRes = await fetch(fallbackUrl, {
+        method: 'GET',
+        mode: 'cors',
+        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
+      });
+      if (fallbackRes.ok) {
+        const json = await fallbackRes.json();
+        const fallbackPatients = parseResponse(json);
+        if (fallbackPatients && fallbackPatients.length > 0) {
+          console.log('✅ [API Client] Berhasil mengambil data pasien langsung dari https://chagrin.id/api');
+          return fallbackPatients;
+        }
+      }
+    } catch (fallbackErr) {
+      console.warn('[API Client] Fallback to chagrin.id/api note:', fallbackErr);
+    }
+  }
+
+  return [];
 }
 
 export async function savePatientApi(patient: Patient): Promise<Patient> {
+  const baseUrl = getApiBaseUrl();
   const payload = mapPatientToPayload(patient);
   
   console.log('🚀 [API POST] Menyimpan data pasien ke MySQL:', {
-    url: `${PHP_API_BASE}/patients.php`,
+    url: `${baseUrl}/patients.php`,
     id: patient.id,
     babyName: patient.babyName,
   });
 
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const res = await fetch(`${baseUrl}/patients.php`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -276,6 +341,7 @@ export async function updatePatientApi(patient: Patient): Promise<Patient> {
 }
 
 export async function softDeletePatientApi(patientId: string): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -286,12 +352,12 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
   };
 
   console.log('🚀 [API POST] Soft Delete Pasien -> update_patient_status.php:', {
-    url: `${PHP_API_BASE}/update_patient_status.php`,
+    url: `${baseUrl}/update_patient_status.php`,
     payload,
   });
 
   try {
-    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+    const res = await fetch(`${baseUrl}/update_patient_status.php`, {
       method: 'POST',
       mode: 'cors',
       headers: {
@@ -312,7 +378,7 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
 
   // Fallback to patients.php if update_patient_status.php is unavailable
   try {
-    const fallbackRes = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const fallbackRes = await fetch(`${baseUrl}/patients.php`, {
       method: 'POST',
       mode: 'cors',
       headers: {
@@ -333,6 +399,7 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
 }
 
 export async function permanentlyDeletePatientApi(patientId: string, medicalRecordNumber?: string): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -344,12 +411,13 @@ export async function permanentlyDeletePatientApi(patientId: string, medicalReco
   };
 
   console.log('🚀 [API POST] Hard Delete (Hapus Permanen) -> delete_patient.php:', {
-    url: `${PHP_API_BASE}/delete_patient.php`,
+    url: `${baseUrl}/delete_patient.php`,
     payload,
   });
 
+  // 1. Try delete_patient.php
   try {
-    const res = await fetch(`${PHP_API_BASE}/delete_patient.php`, {
+    const res = await fetch(`${baseUrl}/delete_patient.php`, {
       method: 'POST',
       mode: 'cors',
       headers: {
@@ -360,12 +428,45 @@ export async function permanentlyDeletePatientApi(patientId: string, medicalReco
     });
 
     const json = await res.json().catch(() => null);
-    console.log('📥 [API Response] Hard delete response:', { status: res.status, json });
+    console.log('📥 [API Response] Hard delete response (delete_patient.php):', { status: res.status, json });
     if (res.ok && json && (json.status === 'success' || json.success === true)) {
-      return true;
+      // Continue to also notify fallback if needed
     }
   } catch (err) {
-    console.warn('⚠️ [API Client] permanentlyDeletePatientApi note:', err);
+    console.warn('⚠️ [API Client] permanentlyDeletePatientApi delete_patient.php note:', err);
+  }
+
+  // 2. Try patients.php fallback
+  try {
+    await fetch(`${baseUrl}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn('⚠️ [API Client] permanentlyDeletePatientApi patients.php fallback note:', err);
+  }
+
+  // 3. Fallback direct to https://chagrin.id/api if baseUrl is local /api
+  if (baseUrl === '/api' && typeof window !== 'undefined' && !window.location.hostname.includes('chagrin.id')) {
+    try {
+      await fetch(`https://chagrin.id/api/delete_patient.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {}
   }
 
   return true;
@@ -379,6 +480,7 @@ export async function deletePatientApi(patientId: string, hard = false, medicalR
 }
 
 export async function updatePatientStatusApi(patientId: string, status: string, dischargeSummary?: any): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -388,11 +490,11 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
     discharge_summary: dischargeSummary,
   };
 
-  console.log('🚀 [API Client] Update status pasien:', { url: `${PHP_API_BASE}/update_patient_status.php`, payload });
+  console.log('🚀 [API Client] Update status pasien:', { url: `${baseUrl}/update_patient_status.php`, payload });
 
   // Try 1: update_patient_status.php (Primary endpoint)
   try {
-    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+    const res = await fetch(`${baseUrl}/update_patient_status.php`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -409,7 +511,7 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
 
   // Try 2: patients.php (Fallback)
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const res = await fetch(`${baseUrl}/patients.php`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -428,6 +530,7 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
 }
 
 export async function restorePatientApi(patientId: string): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -439,13 +542,13 @@ export async function restorePatientApi(patientId: string): Promise<boolean> {
   };
 
   console.log('🚀 [API POST] Pulihkan Pasien (Restore) -> update_patient_status.php:', {
-    url: `${PHP_API_BASE}/update_patient_status.php`,
+    url: `${baseUrl}/update_patient_status.php`,
     payload,
   });
 
   // 1. POST ke /api/update_patient_status.php
   try {
-    const res = await fetch(`${PHP_API_BASE}/update_patient_status.php`, {
+    const res = await fetch(`${baseUrl}/update_patient_status.php`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -462,7 +565,7 @@ export async function restorePatientApi(patientId: string): Promise<boolean> {
 
   // 2. Fallback ke /api/patients.php
   try {
-    const res = await fetch(`${PHP_API_BASE}/patients.php`, {
+    const res = await fetch(`${baseUrl}/patients.php`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -480,16 +583,17 @@ export async function restorePatientApi(patientId: string): Promise<boolean> {
 }
 
 export async function emptyTrashApi(ids?: string[], medicalRecordNumbers?: string[]): Promise<boolean> {
+  const baseUrl = getApiBaseUrl();
   const payload = {
     action: 'empty_trash',
     ids: ids || [],
     medical_record_numbers: medicalRecordNumbers || [],
   };
 
-  console.log('🚀 [API Client] Mengosongkan tempat sampah via delete_patient.php', payload);
+  console.log('🚀 [API Client] Mengosongkan tempat sampah via delete_patient.php & patients.php', payload);
 
   try {
-    const res = await fetch(`${PHP_API_BASE}/delete_patient.php`, {
+    const res = await fetch(`${baseUrl}/delete_patient.php`, {
       method: 'POST',
       mode: 'cors',
       headers: {
@@ -500,10 +604,42 @@ export async function emptyTrashApi(ids?: string[], medicalRecordNumbers?: strin
     });
     const json = await res.json().catch(() => null);
     if (res.ok && json && (json.status === 'success' || json.success === true)) {
-      return true;
+      // success
     }
   } catch (err) {
-    console.warn('⚠️ [API Client] emptyTrashApi note:', err);
+    console.warn('⚠️ [API Client] emptyTrashApi delete_patient.php note:', err);
+  }
+
+  try {
+    await fetch(`${baseUrl}/patients.php`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn('⚠️ [API Client] emptyTrashApi patients.php note:', err);
+  }
+
+  // Fallback direct to https://chagrin.id/api if baseUrl is /api
+  if (baseUrl === '/api' && typeof window !== 'undefined' && !window.location.hostname.includes('chagrin.id')) {
+    try {
+      await fetch(`https://chagrin.id/api/delete_patient.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {}
   }
 
   return true;
@@ -531,7 +667,8 @@ export async function bulkSyncPatientsApi(patients: Patient[]): Promise<void> {
 // =============================================================================
 
 export async function addDailyLogApi(patientId: string, log: DailyLog): Promise<DailyLog> {
-  const url = `${PHP_API_BASE}/daily_logs.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/daily_logs.php`;
   const payload = { action: 'save', patient_id: patientId, ...log };
   console.log('🚀 [DEBUG 1 - BEFORE FETCH] Menyimpan Daily Log:', { url, payload });
 
@@ -556,7 +693,8 @@ export async function updateDailyLogApi(patientId: string, log: DailyLog): Promi
 }
 
 export async function deleteDailyLogApi(patientId: string, logId: string): Promise<void> {
-  const url = `${PHP_API_BASE}/daily_logs.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/daily_logs.php`;
   const payload = { action: 'delete', patient_id: patientId, log_id: logId };
   console.log('🚀 [DEBUG 1 - BEFORE FETCH] Menghapus Daily Log:', { url, payload });
 
@@ -601,8 +739,9 @@ export async function fetchNakesUsersApi(force = false): Promise<NakesUser[]> {
 
   const session = getStoredNakesSession();
   const sessionUserId = session?.nakesUser?.id || '';
+  const baseUrl = getApiBaseUrl();
 
-  const url = `${PHP_API_BASE}/nakes_users.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
+  const url = `${baseUrl}/nakes_users.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
   try {
     const res = await fetch(url, {
       headers: {
@@ -632,7 +771,8 @@ export async function fetchNakesUsersApi(force = false): Promise<NakesUser[]> {
 }
 
 export async function saveNakesUserApi(user: NakesUser): Promise<NakesUser> {
-  const url = `${PHP_API_BASE}/nakes_users.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/nakes_users.php`;
   const isAuth = user.hasAccessRights ? 1 : 0;
   const isSuper = user.isSuperAdmin ? 1 : 0;
 
@@ -690,7 +830,8 @@ export async function saveNakesUserApi(user: NakesUser): Promise<NakesUser> {
 }
 
 export async function deleteNakesUserApi(userId: string): Promise<void> {
-  const url = `${PHP_API_BASE}/nakes_users.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/nakes_users.php`;
   const payload = { action: 'delete', id: userId };
   console.log('🚀 [DEBUG 1 - BEFORE FETCH] Menghapus Akun Nakes:', { url, payload });
 
@@ -717,8 +858,9 @@ export async function recordNakesLoginApi(user: NakesUser): Promise<boolean> {
     return false;
   }
 
-  const logUrl = `${PHP_API_BASE}/nakes_login_logs.php`;
-  const userUrl = `${PHP_API_BASE}/nakes_users.php`;
+  const baseUrl = getApiBaseUrl();
+  const logUrl = `${baseUrl}/nakes_login_logs.php`;
+  const userUrl = `${baseUrl}/nakes_users.php`;
 
   const payload = {
     action: 'save',
@@ -768,8 +910,9 @@ export async function fetchNakesLoginLogsApi(): Promise<any[]> {
 
   const session = getStoredNakesSession();
   const sessionUserId = session?.nakesUser?.id || '';
+  const baseUrl = getApiBaseUrl();
 
-  const url = `${PHP_API_BASE}/nakes_login_logs.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
+  const url = `${baseUrl}/nakes_login_logs.php${sessionUserId ? `?auth_id=${encodeURIComponent(sessionUserId)}` : ''}`;
   try {
     const res = await fetch(url, {
       headers: {
@@ -803,19 +946,20 @@ let currentEducationApiStatus: EducationApiStatus = {
   isError: false,
   status: null,
   message: 'Siap menghubungkan ke endpoint API edukasi',
-  endpoint: `${PHP_API_BASE}/education_pdfs.php`,
+  endpoint: `${getApiBaseUrl()}/education_pdfs.php`,
   lastChecked: new Date().toISOString(),
   isUsingFallback: false,
 };
 
 export function getEducationApiStatus(): EducationApiStatus {
-  return { ...currentEducationApiStatus };
+  return { ...currentEducationApiStatus, endpoint: `${getApiBaseUrl()}/education_pdfs.php` };
 }
 
 function updateEducationApiStatus(status: Partial<EducationApiStatus>) {
   currentEducationApiStatus = {
     ...currentEducationApiStatus,
     ...status,
+    endpoint: `${getApiBaseUrl()}/education_pdfs.php`,
     lastChecked: new Date().toISOString(),
   };
   if (typeof window !== 'undefined') {
@@ -966,8 +1110,8 @@ export function normalizeEducationPdfItem(raw: any, index = 0): EducationPdfItem
 }
 
 export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
-  // Target URL tepat: https://chagrin.id/api/education_pdfs.php dengan default parameter action=get
-  const url = `${PHP_API_BASE}/education_pdfs.php?action=get`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/education_pdfs.php?action=get`;
   console.log('📡 [API Client] Fetching Education PDFs from:', url);
 
   try {
@@ -1010,8 +1154,6 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
 
     if (!json) return [];
 
-    // Parse array secara fleksibel sesuai instruksi:
-    // const pdfList = Array.isArray(json) ? json : (json.data || json.pdfs || json.result || []);
     let rawList: any[] = [];
     if (Array.isArray(json)) {
       rawList = json;
@@ -1058,7 +1200,8 @@ export async function fetchEducationPdfsApi(): Promise<EducationPdfItem[]> {
 }
 
 export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<EducationPdfItem> {
-  const url = `${PHP_API_BASE}/education_pdfs.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/education_pdfs.php`;
   const payload = {
     id: pdf.id,
     title: pdf.title,
@@ -1096,7 +1239,7 @@ export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<Educat
       
       // Fallback ke upload_education.php jika ada
       try {
-        const fallbackRes = await fetch(`${PHP_API_BASE}/upload_education.php`, {
+        const fallbackRes = await fetch(`${baseUrl}/upload_education.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify(payload),
@@ -1122,7 +1265,8 @@ export async function saveEducationPdfApi(pdf: EducationPdfItem): Promise<Educat
 }
 
 export async function updateEducationPdfApi(pdf: EducationPdfItem): Promise<EducationPdfItem> {
-  const url = `${PHP_API_BASE}/education_pdfs.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/education_pdfs.php`;
   const payload = {
     action: 'update',
     id: pdf.id,
@@ -1169,7 +1313,8 @@ export async function updateEducationPdfApi(pdf: EducationPdfItem): Promise<Educ
 }
 
 export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
-  const url = `${PHP_API_BASE}/education_pdfs.php?id=${encodeURIComponent(pdfId)}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/education_pdfs.php?id=${encodeURIComponent(pdfId)}`;
   const payload = { action: 'delete', id: pdfId };
   console.log('🚀 [API Client DELETE] Menghapus PDF Edukasi di:', url, { id: pdfId });
 
@@ -1188,14 +1333,14 @@ export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
     // Fallback ke POST jika DELETE dibatasi
     if (!res || !res.ok) {
       try {
-        await fetch(`${PHP_API_BASE}/education_pdfs.php`, {
+        await fetch(`${baseUrl}/education_pdfs.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify(payload),
         });
       } catch {
         try {
-          await fetch(`${PHP_API_BASE}/delete_education.php`, {
+          await fetch(`${baseUrl}/delete_education.php`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(payload),
@@ -1209,7 +1354,8 @@ export async function deleteEducationPdfApi(pdfId: string): Promise<void> {
 }
 
 export async function reorderEducationPdfsApi(pdfs: EducationPdfItem[]): Promise<void> {
-  const url = `${PHP_API_BASE}/education_pdfs.php`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/education_pdfs.php`;
   const payload = { action: 'reorder', pdfs };
   console.log('🚀 [API Client REORDER] Menyusun ulang PDF Edukasi di:', url, { count: pdfs.length });
 

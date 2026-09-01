@@ -241,12 +241,13 @@ async function startServer() {
       const body = req.body || {};
       const action = String(req.query.action || body.action || 'permanent_delete').toLowerCase();
       const patientId = String(req.query.id || body.id || body.patient_id || body.patientId || '');
+      const mrn = String(req.query.mrn || body.medical_record_number || body.medicalRecordNumber || body.mrn || '');
 
       if (action === 'empty_trash' || action === 'clear_trash') {
         const patients = await getAllPatients({ includeDeleted: true });
         const toDelete = patients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
         for (const p of toDelete) {
-          await deletePatientById(p.id, true);
+          await deletePatientById(p.id, true, p.medicalRecordNumber);
         }
         broadcastRealtimeEvent('data_changed', { type: 'empty_trash' });
         return res.json({
@@ -257,12 +258,12 @@ async function startServer() {
         });
       }
 
-      if (!patientId) {
-        return res.status(400).json({ status: 'error', success: false, message: 'ID Pasien wajib disertakan.' });
+      if (!patientId && !mrn) {
+        return res.status(400).json({ status: 'error', success: false, message: 'ID Pasien atau No. RM wajib disertakan.' });
       }
 
       if (action === 'soft_delete' || action === 'trash' || body.is_deleted === 1 || body.is_deleted === '1') {
-        await deletePatientById(patientId, false);
+        await deletePatientById(patientId, false, mrn);
         broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: false });
         broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
         return res.json({
@@ -274,7 +275,7 @@ async function startServer() {
       }
 
       // Default: Permanent delete
-      await deletePatientById(patientId, true);
+      await deletePatientById(patientId, true, mrn);
       broadcastRealtimeEvent('patient_deleted', { id: patientId, hard: true });
       broadcastRealtimeEvent('data_changed', { type: 'patient', id: patientId });
       return res.json({
@@ -484,28 +485,50 @@ async function startServer() {
   // ---------------------------------------------------------------------------
   // 5. NAKES USERS & LOGIN LOGS API
   // ---------------------------------------------------------------------------
-  app.get('/api/nakes', async (req: Request, res: Response) => {
+  app.get(['/api/nakes', '/api/nakes_users.php'], async (req: Request, res: Response) => {
     try {
       const users = await getAllNakesUsers();
-      res.json({ success: true, data: users });
+      res.json({ success: true, status: 'success', data: users, items: users });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, status: 'error', error: err.message });
     }
   });
 
-  app.post('/api/nakes', async (req: Request, res: Response) => {
+  app.post(['/api/nakes', '/api/nakes_users.php'], async (req: Request, res: Response) => {
     try {
-      const user = req.body;
+      const body = req.body || {};
+      const action = String(body.action || 'save').toLowerCase();
+
+      if (action === 'delete') {
+        const id = String(body.id || req.query.id || '');
+        if (!id) {
+          return res.status(400).json({ success: false, status: 'error', message: 'ID nakes diperlukan.' });
+        }
+        await deleteNakesUserById(id);
+        broadcastRealtimeEvent('nakes_deleted', { id });
+        broadcastRealtimeEvent('data_changed', { type: 'nakes', id });
+        return res.json({ success: true, status: 'success', message: 'Akun nakes berhasil dihapus.' });
+      }
+
+      if (action === 'login') {
+        const user = body.user || body;
+        if (user && user.id) {
+          await recordNakesLoginLog(user);
+        }
+        return res.json({ success: true, status: 'success', message: 'Login tercatat.' });
+      }
+
+      const user = body;
       if (!user || !user.id || !user.username) {
-        return res.status(400).json({ success: false, error: 'Data nakes tidak valid.' });
+        return res.status(400).json({ success: false, status: 'error', error: 'Data nakes tidak valid.' });
       }
 
       const saved = await upsertNakesUser(user);
       broadcastRealtimeEvent('nakes_updated', saved);
       broadcastRealtimeEvent('data_changed', { type: 'nakes', id: saved.id });
-      res.status(201).json({ success: true, data: saved });
+      res.status(201).json({ success: true, status: 'success', data: saved });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, status: 'error', error: err.message });
     }
   });
 
@@ -629,7 +652,7 @@ async function startServer() {
     }
   });
 
-  app.post(['/api/education-pdfs', '/api/education_pdfs.php'], async (req: Request, res: Response) => {
+  app.post(['/api/education-pdfs', '/api/education_pdfs.php', '/api/upload_education.php'], async (req: Request, res: Response) => {
     try {
       const input = req.body;
       const action = (input.action || 'save').toLowerCase();
@@ -704,7 +727,21 @@ async function startServer() {
     }
   });
 
-  app.delete(['/api/education-pdfs', '/api/education_pdfs.php', '/api/education-pdfs/:id'], async (req: Request, res: Response) => {
+  app.all(['/api/delete_education', '/api/delete_education.php'], async (req: Request, res: Response) => {
+    try {
+      const id = (req.body?.id || req.body?.pdf_id || req.query.id) as string;
+      if (id) {
+        await deleteEducationPdfById(id);
+        broadcastRealtimeEvent('pdf_deleted', { id });
+        broadcastRealtimeEvent('data_changed', { type: 'pdf', id });
+      }
+      res.json({ success: true, status: 'success', message: 'PDF berhasil dihapus.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete(['/api/education-pdfs', '/api/education_pdfs.php', '/api/education-pdfs/:id', '/api/delete_education', '/api/delete_education.php'], async (req: Request, res: Response) => {
     try {
       const id = req.params.id || (req.query.id as string) || req.body?.id || req.body?.pdf_id;
       if (!id) {
@@ -727,21 +764,70 @@ async function startServer() {
       if (patientId) {
         const p = patients.find((item) => item.id === patientId);
         const logs = p?.dailyLogs || [];
-        return res.json({ status: 'success', total: logs.length, items: logs, logs });
+        return res.json({ status: 'success', success: true, total: logs.length, items: logs, logs, data: logs });
       }
       const allLogs = patients.flatMap((p) => p.dailyLogs || []);
-      res.json({ status: 'success', total: allLogs.length, items: allLogs, logs: allLogs });
+      res.json({ status: 'success', success: true, total: allLogs.length, items: allLogs, logs: allLogs, data: allLogs });
     } catch (err: any) {
-      res.status(200).json({ status: 'error', message: err.message, logs: [] });
+      res.status(200).json({ status: 'error', success: false, message: err.message, logs: [], data: [] });
     }
   });
 
-  app.get('/api/nakes_login_logs.php', async (req: Request, res: Response) => {
+  app.post('/api/daily_logs.php', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const action = String(body.action || 'save').toLowerCase();
+      const patientId = String(body.patient_id || body.patientId || req.query.patient_id || req.query.id || '');
+      const logId = String(body.log_id || body.logId || body.id || req.query.log_id || '');
+
+      if (!patientId) {
+        return res.status(400).json({ status: 'error', success: false, message: 'ID Pasien diperlukan.' });
+      }
+
+      if (action === 'delete') {
+        if (!logId) {
+          return res.status(400).json({ status: 'error', success: false, message: 'ID Log diperlukan.' });
+        }
+        await deleteDailyLogById(patientId, logId);
+        broadcastRealtimeEvent('daily_log_deleted', { patientId, logId });
+        broadcastRealtimeEvent('data_changed', { type: 'daily_log', patientId });
+        return res.json({ status: 'success', success: true, message: 'Log harian berhasil dihapus.' });
+      }
+
+      const log = { ...body, id: logId || body.id || `log_${Date.now()}` };
+      const saved = await addOrUpdateDailyLog(patientId, log);
+      broadcastRealtimeEvent('daily_log_added', { patientId, log: saved });
+      broadcastRealtimeEvent('data_changed', { type: 'daily_log', patientId });
+      return res.json({ status: 'success', success: true, data: saved });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', success: false, message: err.message });
+    }
+  });
+
+  app.get(['/api/nakes/login-logs', '/api/nakes_login_logs.php'], async (req: Request, res: Response) => {
     try {
       const logs = await getNakesLoginLogs(50);
-      res.json({ status: 'success', total: logs.length, items: logs, logs });
+      res.json({ status: 'success', success: true, total: logs.length, items: logs, logs, data: logs });
     } catch (err: any) {
-      res.status(200).json({ status: 'error', message: err.message, logs: [] });
+      res.status(200).json({ status: 'error', message: err.message, logs: [], data: [] });
+    }
+  });
+
+  app.post('/api/nakes_login_logs.php', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || body.ip_address || '') as string;
+      const userAgent = (req.headers['user-agent'] || body.user_agent || '') as string;
+      const user: any = {
+        id: body.user_id || body.nakes_id || 'nakes_user',
+        name: body.name || 'Nakes NICU',
+        roleTitle: body.role_title || 'Tenaga Kesehatan',
+        accountType: body.account_type || 'Anggota Biasa',
+      };
+      await recordNakesLoginLog(user, ip, userAgent);
+      res.json({ status: 'success', success: true, message: 'Log login dicatat.' });
+    } catch (err: any) {
+      res.status(200).json({ status: 'error', message: err.message });
     }
   });
 

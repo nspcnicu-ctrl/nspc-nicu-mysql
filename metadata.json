@@ -1,6 +1,6 @@
 {
-  "name": "Remix Remix Remix Remix Remix Test",
-  "description": "Imported from GitHub: nspcnicu-ctrl/Test",
+  "name": "NSPC RSUD Undata",
+  "description": "Aplikasi Kartu Perkembangan Bayi dan Dashboard Nakes NICU RSUD Undata",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
