@@ -119,7 +119,13 @@ export function mapRowToPatient(row: any): Patient {
     motherName: row.mother_name || row.motherName || '',
     gender: row.gender || 'Laki-Laki',
     birthDate: row.birth_date || row.birthDate || new Date().toISOString().split('T')[0],
+    birthTime: row.birth_time || row.birthTime || undefined,
     admissionDate: row.admission_date || row.admissionDate || new Date().toISOString().split('T')[0],
+    admissionTime: row.admission_time || row.admissionTime || parseJson(row.initial_anthropometry, {})?.admissionTime || undefined,
+    readyToDischargeDate: row.ready_to_discharge_date || row.readyToDischargeDate || parseJson(row.discharge_summary, {})?.readyToDischargeDate || undefined,
+    readyToDischargeTime: row.ready_to_discharge_time || row.readyToDischargeTime || parseJson(row.discharge_summary, {})?.readyToDischargeTime || undefined,
+    dischargeDate: row.discharge_date || row.dischargeDate || parseJson(row.discharge_summary, {})?.dischargeDate || undefined,
+    dischargeTime: row.discharge_time || row.dischargeTime || parseJson(row.discharge_summary, {})?.dischargeTime || undefined,
     gestationalAgeWeeks: Number(row.gestational_age_weeks || row.gestationalAgeWeeks || 36),
     gestationCategory: row.gestation_category || row.gestationCategory || 'preterm',
     status: row.status || 'Rawat NICU',
@@ -201,6 +207,14 @@ export function mapPatientToPayload(patient: Patient) {
     birth_date: patient.birthDate || new Date().toISOString().split('T')[0],
     birth_time: patient.birthTime || '',
     admission_date: patient.admissionDate || new Date().toISOString().split('T')[0],
+    admission_time: patient.admissionTime || '',
+    admissionTime: patient.admissionTime || '',
+    ready_to_discharge_date: patient.readyToDischargeDate || '',
+    ready_to_discharge_time: patient.readyToDischargeTime || '',
+    readyToDischargeDate: patient.readyToDischargeDate || '',
+    readyToDischargeTime: patient.readyToDischargeTime || '',
+    discharge_date: patient.dischargeDate || '',
+    discharge_time: patient.dischargeTime || '',
     gestational_age_weeks: patient.gestationalAgeWeeks || 36,
     gestation_category: patient.gestationCategory || 'preterm',
     status: patient.status || 'Rawat NICU',
@@ -253,6 +267,33 @@ export async function fetchPatientsApi(includeDeleted = false): Promise<Patient[
   };
 
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
+
+  // If running in development or preview mode (not directly on chagrin.id domain),
+  // prioritize fetching live patient records directly from https://chagrin.id/api
+  if (!isDirectHosting) {
+    try {
+      const liveUrl = includeDeleted
+        ? `https://chagrin.id/api/patients.php?include_deleted=1`
+        : `https://chagrin.id/api/patients.php`;
+      const liveRes = await fetch(liveUrl, {
+        method: 'GET',
+        mode: 'cors',
+        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
+      });
+      if (liveRes.ok) {
+        const json = await liveRes.json();
+        const livePatients = parseResponse(json);
+        if (livePatients && livePatients.length > 0) {
+          console.log(`✅ [API Client] Berhasil memuat ${livePatients.length} pasien langsung dari https://chagrin.id/api`);
+          return livePatients;
+        }
+      }
+    } catch (err) {
+      console.warn('[API Client] Live fetchPatientsApi note:', err);
+    }
+  }
+
   const url = includeDeleted
     ? `${baseUrl}/patients.php?include_deleted=1`
     : `${baseUrl}/patients.php`;
@@ -271,31 +312,7 @@ export async function fetchPatientsApi(includeDeleted = false): Promise<Patient[
       }
     }
   } catch (err) {
-    console.warn('[API Client] Primary fetchPatientsApi note:', err);
-  }
-
-  // Fallback to https://chagrin.id/api if primary URL is local /api and returned no patients
-  if (baseUrl === '/api' && typeof window !== 'undefined' && !window.location.hostname.includes('chagrin.id')) {
-    try {
-      const fallbackUrl = includeDeleted
-        ? `https://chagrin.id/api/patients.php?include_deleted=1`
-        : `https://chagrin.id/api/patients.php`;
-      const fallbackRes = await fetch(fallbackUrl, {
-        method: 'GET',
-        mode: 'cors',
-        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
-      });
-      if (fallbackRes.ok) {
-        const json = await fallbackRes.json();
-        const fallbackPatients = parseResponse(json);
-        if (fallbackPatients && fallbackPatients.length > 0) {
-          console.log('✅ [API Client] Berhasil mengambil data pasien langsung dari https://chagrin.id/api');
-          return fallbackPatients;
-        }
-      }
-    } catch (fallbackErr) {
-      console.warn('[API Client] Fallback to chagrin.id/api note:', fallbackErr);
-    }
+    console.warn('[API Client] BaseUrl fetchPatientsApi note:', err);
   }
 
   return [];
@@ -311,6 +328,26 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
     babyName: patient.babyName,
   });
 
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
+
+  // 1. If running outside chagrin.id (e.g. dev server / AI Studio preview),
+  // ALWAYS save directly to https://chagrin.id/api/patients.php first so MySQL is updated immediately!
+  if (!isDirectHosting) {
+    try {
+      const liveRes = await fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const liveJson = await liveRes.json().catch(() => null);
+      console.log('✅ [Live Sync] Direct save to https://chagrin.id/api/patients.php response:', liveJson);
+    } catch (liveErr) {
+      console.warn('⚠️ [Live Sync] Direct save to chagrin.id/api note:', liveErr);
+    }
+  }
+
+  // 2. Also save to current baseUrl (local dev server or host)
   try {
     const res = await fetch(`${baseUrl}/patients.php`, {
       method: 'POST',
@@ -320,20 +357,14 @@ export async function savePatientApi(patient: Patient): Promise<Patient> {
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      const errMsg = json?.message || (json?.data?.error_info ? JSON.stringify(json.data.error_info) : null) || `HTTP ${res.status}`;
-      console.warn('⚠️ [API POST Info] Respon server non-200 (data tersimpan di memori):', { status: res.status, errMsg });
+    if (res.ok && json && (json.status === 'success' || json.success === true)) {
       return patient;
     }
-    if (json && (json.status === 'error' || json.success === false)) {
-      console.warn('⚠️ [API POST Info] Server mengembalikan pesan:', json.message);
-      return patient;
-    }
-    return patient;
   } catch (err) {
-    console.warn('⚠️ [API POST Info] Koneksi sync backend (data aman):', err);
-    return patient;
+    console.warn('⚠️ [API POST Info] Primary savePatientApi warning:', err);
   }
+
+  return patient;
 }
 
 export async function updatePatientApi(patient: Patient): Promise<Patient> {
@@ -342,6 +373,7 @@ export async function updatePatientApi(patient: Patient): Promise<Patient> {
 
 export async function softDeletePatientApi(patientId: string): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -356,6 +388,25 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
     payload,
   });
 
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/update_patient_status.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+
+      fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
+
   try {
     const res = await fetch(`${baseUrl}/update_patient_status.php`, {
       method: 'POST',
@@ -368,7 +419,6 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
     });
 
     const json = await res.json().catch(() => null);
-    console.log('📥 [API Response] Soft delete response:', { status: res.status, json });
     if (res.ok && json && (json.status === 'success' || json.success === true)) {
       return true;
     }
@@ -400,6 +450,7 @@ export async function softDeletePatientApi(patientId: string): Promise<boolean> 
 
 export async function permanentlyDeletePatientApi(patientId: string, medicalRecordNumber?: string): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -414,6 +465,25 @@ export async function permanentlyDeletePatientApi(patientId: string, medicalReco
     url: `${baseUrl}/delete_patient.php`,
     payload,
   });
+
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/delete_patient.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+
+      fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
 
   // 1. Try delete_patient.php
   try {
@@ -430,7 +500,7 @@ export async function permanentlyDeletePatientApi(patientId: string, medicalReco
     const json = await res.json().catch(() => null);
     console.log('📥 [API Response] Hard delete response (delete_patient.php):', { status: res.status, json });
     if (res.ok && json && (json.status === 'success' || json.success === true)) {
-      // Continue to also notify fallback if needed
+      return true;
     }
   } catch (err) {
     console.warn('⚠️ [API Client] permanentlyDeletePatientApi delete_patient.php note:', err);
@@ -451,24 +521,6 @@ export async function permanentlyDeletePatientApi(patientId: string, medicalReco
     console.warn('⚠️ [API Client] permanentlyDeletePatientApi patients.php fallback note:', err);
   }
 
-  // 3. Fallback direct to https://chagrin.id/api if baseUrl is local /api
-  if (baseUrl === '/api' && typeof window !== 'undefined' && !window.location.hostname.includes('chagrin.id')) {
-    try {
-      await fetch(`https://chagrin.id/api/delete_patient.php`, {
-        method: 'POST',
-        mode: 'cors',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      await fetch(`https://chagrin.id/api/patients.php`, {
-        method: 'POST',
-        mode: 'cors',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {}
-  }
-
   return true;
 }
 
@@ -481,6 +533,7 @@ export async function deletePatientApi(patientId: string, hard = false, medicalR
 
 export async function updatePatientStatusApi(patientId: string, status: string, dischargeSummary?: any): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -491,6 +544,25 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
   };
 
   console.log('🚀 [API Client] Update status pasien:', { url: `${baseUrl}/update_patient_status.php`, payload });
+
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/update_patient_status.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+
+      fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
 
   // Try 1: update_patient_status.php (Primary endpoint)
   try {
@@ -531,6 +603,7 @@ export async function updatePatientStatusApi(patientId: string, status: string, 
 
 export async function restorePatientApi(patientId: string): Promise<boolean> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const payload = {
     id: patientId,
     patient_id: patientId,
@@ -545,6 +618,25 @@ export async function restorePatientApi(patientId: string): Promise<boolean> {
     url: `${baseUrl}/update_patient_status.php`,
     payload,
   });
+
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/update_patient_status.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+
+      fetch(`https://chagrin.id/api/patients.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
 
   // 1. POST ke /api/update_patient_status.php
   try {
@@ -668,9 +760,22 @@ export async function bulkSyncPatientsApi(patients: Patient[]): Promise<void> {
 
 export async function addDailyLogApi(patientId: string, log: DailyLog): Promise<DailyLog> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const url = `${baseUrl}/daily_logs.php`;
   const payload = { action: 'save', patient_id: patientId, ...log };
   console.log('🚀 [DEBUG 1 - BEFORE FETCH] Menyimpan Daily Log:', { url, payload });
+
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/daily_logs.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
 
   try {
     const res = await fetch(url, {
@@ -694,9 +799,22 @@ export async function updateDailyLogApi(patientId: string, log: DailyLog): Promi
 
 export async function deleteDailyLogApi(patientId: string, logId: string): Promise<void> {
   const baseUrl = getApiBaseUrl();
+  const isDirectHosting = typeof window !== 'undefined' && window.location.hostname.includes('chagrin.id');
   const url = `${baseUrl}/daily_logs.php`;
   const payload = { action: 'delete', patient_id: patientId, log_id: logId };
   console.log('🚀 [DEBUG 1 - BEFORE FETCH] Menghapus Daily Log:', { url, payload });
+
+  // Direct sync to live chagrin.id MySQL
+  if (!isDirectHosting) {
+    try {
+      fetch(`https://chagrin.id/api/daily_logs.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    } catch (e) {}
+  }
 
   try {
     const res = await fetch(url, {

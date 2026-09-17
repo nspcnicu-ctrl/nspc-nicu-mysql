@@ -4,6 +4,8 @@ import {
   formatBabyAge,
   formatLengthOfStay,
   formatIndonesianDate,
+  getPatientAdmissionDateTime,
+  getPatientDischargeDateTime,
 } from '../utils/dateUtils';
 import { Heart, Printer, CheckCircle2, ShieldCheck, XCircle, ArrowLeft } from 'lucide-react';
 
@@ -25,6 +27,8 @@ export const NspcCardPrint: React.FC<NspcCardPrintProps> = ({ patient, onClose }
 
   const latestLog = progressLogs[0];
   const isAterm = patient.gestationCategory === 'aterm';
+  const admissionInfo = getPatientAdmissionDateTime(patient);
+  const dischargeInfo = getPatientDischargeDateTime(patient);
 
   const handlePrint = () => {
     window.print();
@@ -112,7 +116,10 @@ export const NspcCardPrint: React.FC<NspcCardPrintProps> = ({ patient, onClose }
           </div>
           <div className="space-y-1.5">
             <p><span className="text-slate-500">Tanggal Lahir:</span> <strong className="text-slate-800">{formatIndonesianDate(patient.birthDate)}</strong></p>
-            <p><span className="text-slate-500">Tanggal Masuk:</span> <strong className="text-slate-800">{formatIndonesianDate(patient.admissionDate)}</strong></p>
+            <p><span className="text-slate-500">Waktu Masuk:</span> <strong className="text-slate-900">{admissionInfo ? admissionInfo.fullDisplay : formatIndonesianDate(patient.admissionDate)}</strong></p>
+            {dischargeInfo && (
+              <p><span className="text-amber-700">Waktu Pulang:</span> <strong className="text-amber-950">{dischargeInfo.fullDisplay}</strong></p>
+            )}
             <p><span className="text-slate-500">Usia Kehamilan:</span> <strong className="text-slate-800">{patient.gestationalAgeWeeks} Minggu</strong></p>
             <p><span className="text-slate-500">Usia & Lama Rawat:</span> <strong className="text-teal-800">{formatBabyAge(patient.birthDate, patient.gestationalAgeWeeks)} ({formatLengthOfStay(patient.admissionDate)})</strong></p>
           </div>

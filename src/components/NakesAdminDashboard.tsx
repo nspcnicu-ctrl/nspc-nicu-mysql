@@ -14,6 +14,8 @@ import {
   formatLengthOfStay,
   formatIndonesianDate,
   formatShortDate,
+  getPatientAdmissionDateTime,
+  getPatientDischargeDateTime,
 } from '../utils/dateUtils';
 import {
   normalizeMilestones,
@@ -53,6 +55,7 @@ import { GlobalEducationPage } from './GlobalEducationPage';
 import { ManageNakesUsersModal } from './ManageNakesUsersModal';
 import { ExportSpreadsheetModal } from './ExportSpreadsheetModal';
 import { DatabaseSyncModal } from './DatabaseSyncModal';
+import { CustomTimeModal, CustomTimeTab } from './CustomTimeModal';
 import {
   Plus,
   Search,
@@ -85,6 +88,7 @@ import {
   Upload,
   Download,
   CheckCircle2,
+  LogIn,
   LogOut,
   RotateCcw,
   RefreshCw,
@@ -95,6 +99,9 @@ import {
   AlertTriangle,
   SlidersHorizontal,
   Loader2,
+  X,
+  Save,
+  Pencil,
 } from 'lucide-react';
 
 interface NakesAdminDashboardProps {
@@ -235,6 +242,8 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     'Selamat! Si kecil telah memenuhi syarat indikator medis dan dinyatakan LULUS dari NICU RSUD Undata.'
   );
   const [dischargeDoctor, setDischargeDoctor] = useState('Tim Dokter DPJP NICU RSUD Undata');
+  const [dischargeDateVal, setDischargeDateVal] = useState(new Date().toISOString().split('T')[0]);
+  const [dischargeTimeVal, setDischargeTimeVal] = useState(new Date().toTimeString().slice(0, 5));
 
   // Other Action Confirmation Modals states
   const [cancelDischargePatientTarget, setCancelDischargePatientTarget] = useState<Patient | null>(null);
@@ -385,6 +394,9 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
   const [gender, setGender] = useState<Gender>('Laki-Laki');
   const [birthDate, setBirthDate] = useState(new Date().toISOString().split('T')[0]);
   const [admissionDate, setAdmissionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [admissionTime, setAdmissionTime] = useState(new Date().toTimeString().slice(0, 5));
+  const [customTimeModalPatient, setCustomTimeModalPatient] = useState<Patient | null>(null);
+  const [customTimeModalTab, setCustomTimeModalTab] = useState<CustomTimeTab>('admission');
   const [gestationalAgeWeeks, setGestationalAgeWeeks] = useState(38);
   const [weightGram, setWeightGram] = useState(2500);
   const [lengthCm, setLengthCm] = useState(46);
@@ -562,6 +574,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     setGender('Laki-Laki');
     setBirthDate(new Date().toISOString().split('T')[0]);
     setAdmissionDate(new Date().toISOString().split('T')[0]);
+    setAdmissionTime(new Date().toTimeString().slice(0, 5));
     setGestationalAgeWeeks(38);
     setWeightGram(2800);
     setLengthCm(46);
@@ -594,6 +607,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
       gender,
       birthDate,
       admissionDate,
+      admissionTime: admissionTime.trim() || undefined,
       gestationalAgeWeeks,
       gestationCategory,
       initialAnthropometry: {
@@ -617,6 +631,30 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     onRefreshData();
     setSelectedPatient(newPat);
     setIsShareModalOpen(true);
+  };
+
+  const handleOpenCustomTimeModal = (p: Patient, tab: CustomTimeTab = 'admission') => {
+    const isEligibleDischarge =
+      p.status === 'Siap Pulang' ||
+      p.status === 'Sudah Pulang' ||
+      Boolean(p.dischargedAt);
+    setCustomTimeModalPatient(p);
+    setCustomTimeModalTab(tab === 'discharge' && !isEligibleDischarge ? 'admission' : tab);
+  };
+
+  const handleOpenCustomDischargeModal = (p: Patient) => {
+    const isEligibleDischarge =
+      p.status === 'Siap Pulang' ||
+      p.status === 'Sudah Pulang' ||
+      Boolean(p.dischargedAt);
+    handleOpenCustomTimeModal(p, isEligibleDischarge ? 'discharge' : 'admission');
+  };
+
+  const handleSaveCustomTime = async (updated: Patient, message: string) => {
+    updatePatient(updated);
+    if (onRefreshData) onRefreshData();
+    setSuccessBanner(message);
+    setTimeout(() => setSuccessBanner(null), 4500);
   };
 
   // Open Log Modal for selected patient
@@ -734,6 +772,8 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     setDischargeDoctor(
       currentNakesUser ? `DPJP: ${currentNakesUser.name}` : 'Tim Dokter DPJP NICU RSUD Undata'
     );
+    setDischargeDateVal(patient.readyToDischargeDate || patient.dischargeDate || new Date().toISOString().split('T')[0]);
+    setDischargeTimeVal(patient.readyToDischargeTime || patient.dischargeTime || new Date().toTimeString().slice(0, 5));
     setIsDischargeModalOpen(true);
   };
 
@@ -742,10 +782,12 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
     markPatientDischarged(
       patientToDischarge.id,
       dischargeNotes.trim() || 'Selamat! Si kecil telah memenuhi syarat indikator medis dan dinyatakan LULUS dari NICU RSUD Undata.',
-      dischargeDoctor.trim() || 'Tim Dokter DPJP NICU RSUD Undata'
+      dischargeDoctor.trim() || 'Tim Dokter DPJP NICU RSUD Undata',
+      dischargeDateVal,
+      dischargeTimeVal
     );
     setSuccessBanner(
-      `🎉 Status ${patientToDischarge.babyName} berhasil diubah menjadi SUDAH PULANG (Alumni NICU).`
+      `🎉 Status ${patientToDischarge.babyName} berhasil diubah menjadi SUDAH PULANG (Alumni NICU) pada ${dischargeDateVal} pukul ${dischargeTimeVal} WITA.`
     );
     setTimeout(() => setSuccessBanner(null), 5000);
     setIsDischargeModalOpen(false);
@@ -1082,16 +1124,6 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             >
               <FileSpreadsheet className="w-4 h-4 text-teal-700 shrink-0" />
               <span>Ekspor Spreadsheet Pasien</span>
-            </button>
-
-            <button
-              onClick={() => setIsSqlModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 font-bold text-xs shadow-2xs transition-all cursor-pointer w-full sm:w-auto"
-              title="Periksa Koneksi Database MySQL Niagahoster & Status Real-Time"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-              <Database className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Database MySQL & Sync</span>
             </button>
 
             <button
@@ -1591,14 +1623,6 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsSqlModalOpen(true)}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>Tarik & Sinkronkan Data dari Database Real</span>
-                </button>
-                <button
-                  type="button"
                   onClick={handleOpenAddPatient}
                   className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md shadow-teal-600/20 transition-all flex items-center gap-2 cursor-pointer"
                 >
@@ -1627,6 +1651,9 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             const isDeletedItem = isPatientDeleted(p);
             const latestLog = p.dailyLogs[0];
             const currentWeight = latestLog ? latestLog.weightGram : p.initialAnthropometry.weightGram;
+            const admissionInfo = getPatientAdmissionDateTime(p);
+            const dischargeInfo = getPatientDischargeDateTime(p);
+            const isAlumni = p.status === 'Sudah Pulang' || Boolean(dischargeInfo);
 
             return (
               <div
@@ -1637,18 +1664,107 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
               >
                 <div className="p-5 space-y-4">
                   
-                    {/* Top Row: Gestational Category Badge & RM Number */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${
-                        isAterm
-                          ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                          : 'border-amber-300/90 bg-amber-50 text-amber-900'
-                      }`}>
-                        {isAterm ? 'Aterm (>37 Mgg) • Input Harian' : 'Preterm (<36 Mgg) • Input Mingguan'}
-                      </span>
-                      <span className="text-slate-500 font-bold text-[11px] tracking-wider font-mono shrink-0">
-                        {p.medicalRecordNumber || `RM-2026-${p.id.padStart(4, '0')}`}
-                      </span>
+                    {/* Top Row: Gestational Category Badge & RM Number & Waktu Masuk/Pulang */}
+                    <div className="pb-2.5 border-b border-slate-100 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${
+                          isAterm
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                            : 'border-amber-300/90 bg-amber-50 text-amber-900'
+                        }`}>
+                          {isAterm ? 'Aterm (>37 Mgg) • Input Harian' : 'Preterm (<36 Mgg) • Input Mingguan'}
+                        </span>
+                        <span className="text-slate-500 font-bold text-[11px] tracking-wider font-mono shrink-0">
+                          {p.medicalRecordNumber || `RM-2026-${p.id.padStart(4, '0')}`}
+                        </span>
+                      </div>
+
+                      {/* Waktu Masuk & Pulang di Bagian Atas Card */}
+                      <div className="space-y-1.5 text-[11px]">
+                        {/* Waktu Masuk - BISA DIKLIK & DICUSTOM */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenCustomTimeModal(p, 'admission');
+                          }}
+                          className="flex items-center justify-between gap-2 text-teal-900 bg-teal-50/70 hover:bg-teal-100/90 px-2.5 py-1.5 rounded-lg border border-teal-200/80 hover:border-teal-400 shadow-2xs cursor-pointer transition-all group"
+                          title="Klik untuk Sesuaikan / Custom Waktu Masuk Pasien"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Clock className="w-3.5 h-3.5 text-teal-600 shrink-0 group-hover:scale-110 transition-transform" />
+                            <span className="text-teal-800 font-bold shrink-0">Masuk:</span>
+                            <span className="font-extrabold text-teal-950 truncate group-hover:underline">
+                              {admissionInfo ? admissionInfo.fullDate : formatIndonesianDate(p.admissionDate)}
+                            </span>
+                          </div>
+                          {admissionInfo ? (
+                            <span className="font-mono font-extrabold text-[10px] text-teal-900 bg-white group-hover:bg-teal-200 px-2 py-0.5 rounded shrink-0 border border-teal-300 group-hover:border-teal-500 shadow-2xs transition-colors flex items-center gap-1">
+                              <span>Pukul {admissionInfo.timeStr}</span>
+                              <Pencil className="w-2.5 h-2.5 text-teal-700" />
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-teal-800 font-bold underline flex items-center gap-1">
+                              <span>Atur Jam</span>
+                              <Pencil className="w-2.5 h-2.5" />
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Waktu Pulang (Sudah Pulang / Alumni) */}
+                        {(p.status === 'Sudah Pulang' || isAlumni) && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCustomTimeModal(p, 'discharge');
+                            }}
+                            className="flex items-center justify-between gap-2 text-amber-900 bg-amber-50 hover:bg-amber-100/90 px-2.5 py-1.5 rounded-lg border border-amber-200/90 hover:border-amber-400 shadow-2xs cursor-pointer transition-all group"
+                            title="Klik untuk Sesuaikan / Custom Waktu Pulang Pasien"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <GraduationCap className="w-3.5 h-3.5 text-amber-600 shrink-0 group-hover:scale-110 transition-transform" />
+                              <span className="text-amber-800 font-bold shrink-0">Pulang:</span>
+                              <span className="font-extrabold text-amber-950 truncate group-hover:underline">
+                                {dischargeInfo ? dischargeInfo.fullDate : (p.dischargeDate ? formatIndonesianDate(p.dischargeDate) : '-')}
+                              </span>
+                            </div>
+                            {dischargeInfo ? (
+                              <span className="font-mono font-extrabold text-[10px] text-amber-900 bg-white group-hover:bg-amber-200 px-2 py-0.5 rounded shrink-0 border border-amber-300 group-hover:border-amber-500 shadow-2xs transition-colors flex items-center gap-1">
+                                <span>Pukul {dischargeInfo.timeStr}</span>
+                                <Pencil className="w-2.5 h-2.5 text-amber-700" />
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-amber-800 font-bold underline flex items-center gap-1">
+                                <span>Atur Jam</span>
+                                <Pencil className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Waktu Siap Pulang */}
+                        {(p.status === 'Siap Pulang' || isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) && p.status !== 'Sudah Pulang' && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCustomTimeModal(p, 'discharge');
+                            }}
+                            className="flex items-center justify-between gap-2 text-emerald-900 bg-emerald-50 hover:bg-emerald-100/90 px-2.5 py-1.5 rounded-lg border border-emerald-200/90 hover:border-emerald-400 shadow-2xs cursor-pointer transition-all group"
+                            title="Klik untuk Sesuaikan / Custom Waktu Siap Pulang"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 group-hover:scale-110 transition-transform" />
+                              <span className="text-emerald-800 font-bold shrink-0">Siap Pulang:</span>
+                              <span className="font-extrabold text-emerald-950 truncate group-hover:underline">
+                                {p.readyToDischargeDate ? formatIndonesianDate(p.readyToDischargeDate) : formatIndonesianDate(new Date().toISOString().split('T')[0])}
+                              </span>
+                            </div>
+                            <span className="font-mono font-extrabold text-[10px] text-emerald-900 bg-white group-hover:bg-emerald-200 px-2 py-0.5 rounded shrink-0 border border-emerald-300 group-hover:border-emerald-500 shadow-2xs transition-colors flex items-center gap-1">
+                              <span>{p.readyToDischargeTime ? `Pukul ${p.readyToDischargeTime} WITA` : 'Pukul 10:00 WITA'}</span>
+                              <Pencil className="w-2.5 h-2.5 text-emerald-700" />
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Main Header with Baby Avatar, Name, Parents & Location Pin */}
@@ -1728,14 +1844,17 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
 
                   {/* Alumni status badge */}
                   {p.status === 'Sudah Pulang' && !isDeletedItem && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <GraduationCap className="w-4 h-4 text-amber-600 shrink-0" />
-                        <div>
-                          <div className="font-bold text-amber-900 text-xs">🎓 Alumni Pasien NICU</div>
-                          <div className="text-[10px] text-amber-700 font-medium">
-                            Telah lulus medis • Rekam data tersimpan permanen
-                          </div>
+                    <div className="p-3 bg-amber-50 border border-amber-300/90 rounded-2xl text-xs text-amber-900 flex items-center gap-2.5 shadow-2xs">
+                      <div className="p-1.5 bg-amber-600 text-white rounded-xl shrink-0">
+                        <GraduationCap className="w-4 h-4 text-amber-100" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-amber-950 text-xs flex items-center gap-1.5">
+                          <span>🎓 Alumni Pasien NICU</span>
+                          <span className="px-1.5 py-0.5 bg-amber-200/80 text-amber-950 rounded-full text-[9px] font-black">LULUS</span>
+                        </div>
+                        <div className="text-[11px] text-amber-800 font-medium mt-0.5">
+                          Telah menyelesaikan perawatan &amp; lulus medis
                         </div>
                       </div>
                     </div>
@@ -1753,6 +1872,42 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                           </div>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Status Siap Pulang & Waktu Siap Pulang Custom */}
+                  {(p.status === 'Siap Pulang' || isMilestoneChecked(p.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) && p.status !== 'Sudah Pulang' && !isDeletedItem && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs text-emerald-950 flex items-center justify-between gap-2 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-1.5 bg-emerald-600 text-white rounded-xl shrink-0">
+                          <Sparkles className="w-4 h-4 text-amber-200" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                            <span>Status: Siap Pulang</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          </div>
+                          <div className="text-[11px] text-emerald-800 font-semibold truncate mt-0.5">
+                            Waktu Siap Pulang:{' '}
+                            <span className="font-black text-emerald-950 underline">
+                              {p.readyToDischargeDate ? formatIndonesianDate(p.readyToDischargeDate) : formatIndonesianDate(new Date().toISOString().split('T')[0])}
+                              {p.readyToDischargeTime ? ` • ${p.readyToDischargeTime} WITA` : ' • 10:00 WITA'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenCustomDischargeModal(p);
+                        }}
+                        className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-bold shadow-2xs cursor-pointer shrink-0 transition-all flex items-center gap-1"
+                        title="Sesuaikan Waktu Pasien Siap Pulang"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Custom Waktu</span>
+                      </button>
                     </div>
                   )}
 
@@ -1872,11 +2027,11 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                       {p.status === 'Sudah Pulang' ? (
                         <button
                           onClick={() => handleCancelDischargeAction(p)}
-                          className="px-2.5 py-2 bg-rose-100 hover:bg-rose-600 hover:text-white text-rose-800 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 border border-rose-200 cursor-pointer text-center"
+                          className="w-full px-2.5 py-2 bg-rose-100 hover:bg-rose-600 hover:text-white text-rose-800 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 border border-rose-200 cursor-pointer text-center"
                           title="Batalkan Status Kepulangan Pasien"
                         >
                           <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">Batalkan Pulang</span>
+                          <span className="truncate">Batal Pulang</span>
                         </button>
                       ) : (
                         <button
@@ -2068,6 +2223,15 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
                       value={admissionDate}
                       onChange={(e) => setAdmissionDate(e.target.value)}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Waktu Masuk Pasien (Jam:Menit)</label>
+                    <input
+                      type="time"
+                      value={admissionTime}
+                      onChange={(e) => setAdmissionTime(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900"
                     />
                   </div>
                 </div>
@@ -2801,7 +2965,7 @@ export const NakesAdminDashboard: React.FC<NakesAdminDashboardProps> = ({
             <div className="space-y-3 text-xs text-slate-600">
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1 font-mono">
                 <p><strong>Database Engine:</strong> <span className="text-teal-800 font-bold">MySQL 8.0+ (Niagahoster / cPanel)</span></p>
-                <p><strong>Database Name:</strong> <span className="text-sky-700 font-bold">{process.env.MYSQL_DATABASE || 'nspc_nicu_db'}</span></p>
+                <p><strong>Database Name:</strong> <span className="text-sky-700 font-bold">{typeof process !== 'undefined' && process?.env?.MYSQL_DATABASE ? process.env.MYSQL_DATABASE : 'nspc_nicu_db'}</span></p>
                 <p><strong>Sinkronisasi Real-Time:</strong> <span className="text-emerald-600 font-bold">● Server-Sent Events (SSE) Aktif Otomatis</span></p>
                 <p><strong>Alur:</strong> <span className="text-slate-700">Bidirectional 2-Arah (Web ⇄ MySQL Otomatis tanpa tombol manual)</span></p>
               </div>
@@ -3024,6 +3188,96 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
                 <p className="leading-relaxed text-slate-700 text-[11px]">
                   Status pasien akan diubah menjadi <strong className="text-slate-900">SUDAH PULANG (Alumni NICU)</strong>. Data rekam medis pasien ini akan tersimpan <strong className="text-emerald-800 font-bold">permanen di Data Alumni</strong>.
                 </p>
+              </div>
+
+              {/* Custom Tanggal & Waktu Pulang Input */}
+              <div className="p-3.5 bg-teal-50/70 rounded-2xl border border-teal-200/90 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-teal-900 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-teal-600" />
+                    <span>Waktu Kepulangan Pasien (WITA)</span>
+                  </span>
+                  <span className="text-[10px] font-semibold text-teal-700 bg-white px-2 py-0.5 rounded border border-teal-200">
+                    Zona Waktu Palu
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Tanggal Pulang
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={dischargeDateVal}
+                        onChange={(e) => setDischargeDateVal(e.target.value)}
+                        required
+                        className="w-full pl-8 pr-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:border-teal-600 outline-none"
+                      />
+                      <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Jam Pulang (WITA)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="time"
+                        value={dischargeTimeVal}
+                        onChange={(e) => setDischargeTimeVal(e.target.value)}
+                        required
+                        className="w-full pl-8 pr-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:border-teal-600 outline-none"
+                      />
+                      <Clock className="w-3.5 h-3.5 text-teal-600 absolute left-2.5 top-2.5 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                  <span className="text-[10px] text-slate-500 font-semibold mr-1">Preset Jam:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      setDischargeDateVal(now.toISOString().split('T')[0]);
+                      setDischargeTimeVal(now.toTimeString().slice(0, 5));
+                    }}
+                    className="px-2 py-0.5 bg-teal-100 hover:bg-teal-200 text-teal-900 text-[10px] font-bold rounded-md transition-colors"
+                  >
+                    ⏱️ Sekarang
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDischargeTimeVal('08:00')}
+                    className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 text-[10px] font-bold rounded-md border border-slate-200"
+                  >
+                    08:00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDischargeTimeVal('10:00')}
+                    className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 text-[10px] font-bold rounded-md border border-slate-200"
+                  >
+                    10:00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDischargeTimeVal('12:00')}
+                    className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 text-[10px] font-bold rounded-md border border-slate-200"
+                  >
+                    12:00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDischargeTimeVal('14:00')}
+                    className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 text-[10px] font-bold rounded-md border border-slate-200"
+                  >
+                    14:00
+                  </button>
+                </div>
               </div>
 
               {/* Optional DPJP & Notes input */}
@@ -3817,6 +4071,15 @@ CREATE TABLE IF NOT EXISTS education_pdfs (
         onClose={() => setIsExportModalOpen(false)}
         patients={patients}
         filteredPatients={filteredPatients}
+      />
+
+      {/* MODAL CUSTOM WAKTU (MASUK MAUPUN PULANG) */}
+      <CustomTimeModal
+        isOpen={Boolean(customTimeModalPatient)}
+        onClose={() => setCustomTimeModalPatient(null)}
+        patient={customTimeModalPatient}
+        initialTab={customTimeModalTab}
+        onSave={handleSaveCustomTime}
       />
 
       {/* DATABASE MYSQL & REAL-TIME SYNC MODAL */}

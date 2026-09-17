@@ -12,6 +12,8 @@ import {
   formatLengthOfStay,
   formatIndonesianDate,
   formatShortDate,
+  getPatientAdmissionDateTime,
+  getPatientDischargeDateTime,
 } from '../utils/dateUtils';
 import { isMilestoneChecked, isPatientEligibleForPrint } from '../utils/milestones';
 import { SouvenirCardModal } from './SouvenirCardModal';
@@ -142,6 +144,8 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
   const currentLog = progressLogs[selectedLogIndex] || progressLogs[0];
   const isAterm = patient.gestationCategory === 'aterm';
   const isEligibleForPrint = isPatientEligibleForPrint(patient);
+  const admissionInfo = getPatientAdmissionDateTime(patient);
+  const dischargeInfo = getPatientDischargeDateTime(patient);
 
   // Trigger celebration if Boleh Pulang is unlocked
   const triggerCelebration = () => {
@@ -746,6 +750,44 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
           </div>
         )}
 
+        {/* SIAP PULANG BANNER WITH CUSTOM TIME */}
+        {(patient.status === 'Siap Pulang' || isMilestoneChecked(patient.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) && patient.status !== 'Sudah Pulang' && (
+          <div className="mt-5 p-4 sm:p-5 bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-700 text-white rounded-2xl shadow-lg border border-emerald-400/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-white/20 backdrop-blur-md rounded-2xl text-amber-300 shrink-0 shadow-xs">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 bg-white/20 text-white text-[11px] font-black rounded-full uppercase tracking-wider">
+                    🎉 Siap Pulang
+                  </span>
+                  <span className="text-emerald-100 text-xs font-semibold">
+                    Kondisi Medis Si Kecil Telah Memenuhi Syarat
+                  </span>
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                  Jadwal Waktu Siap Pulang:{' '}
+                  <span className="text-amber-300 underline font-black">
+                    {patient.readyToDischargeDate ? formatIndonesianDate(patient.readyToDischargeDate) : formatIndonesianDate(new Date().toISOString().split('T')[0])}{' '}
+                    {patient.readyToDischargeTime ? `• Pukul ${patient.readyToDischargeTime} WITA` : '• Pukul 10:00 WITA'}
+                  </span>
+                </h3>
+                <p className="text-teal-50 text-xs mt-0.5">
+                  Ayah &amp; Bunda dapat bersiap-siap untuk menjemput si kecil sesuai jadwal waktu di atas.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={triggerCelebration}
+              className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 font-black text-xs rounded-xl shadow-md transition-all shrink-0 cursor-pointer self-stretch sm:self-auto text-center"
+            >
+              Rayakan Kelulusan! 🎊
+            </button>
+          </div>
+        )}
+
         {/* DISCHARGED ALUMNI CELEBRATION BANNER */}
         {patient.status === 'Sudah Pulang' && (
           <div className="mt-5 p-4 bg-amber-400 text-amber-950 rounded-2xl shadow-md border border-amber-300 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold">
@@ -758,6 +800,7 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                   🎉 Selamat Atas Kepulangan Si Kecil!
                 </h4>
                 <p className="text-amber-900 text-xs mt-0.5">
+                  Tanggal &amp; Waktu Pulang: <strong>{patient.dischargeDate ? formatIndonesianDate(patient.dischargeDate) : '-'}</strong> {patient.dischargeTime ? `• Pukul ${patient.dischargeTime} WITA` : ''}.
                   Si kecil telah lulus medis dari NICU RSUD Undata. Rekam medis perkembangan tersimpan aman sebagai data Alumni NICU. Silakan unduh Kartu Kenangan sebagai apresiasi kelulusan.
                 </p>
               </div>
@@ -893,10 +936,34 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
               <span className="text-slate-500 font-medium">Tanggal Lahir</span>
               <span className="font-extrabold text-slate-800">{formatIndonesianDate(patient.birthDate)}</span>
             </div>
-            <div className="flex justify-between py-1.5">
-              <span className="text-slate-500 font-medium">Tanggal Masuk NICU</span>
-              <span className="font-extrabold text-teal-700">{formatIndonesianDate(patient.admissionDate)}</span>
+            <div className="flex justify-between items-center py-2 border-b border-slate-50 gap-2">
+              <span className="text-slate-500 font-medium">Waktu Masuk NICU</span>
+              <div className="text-right">
+                <span className="font-extrabold text-teal-900 block text-xs sm:text-sm">
+                  {admissionInfo ? admissionInfo.fullDate : formatIndonesianDate(patient.admissionDate)}
+                </span>
+                {admissionInfo && (
+                  <span className="text-[11px] font-bold text-teal-700 block">
+                    Pukul {admissionInfo.timeStr}
+                  </span>
+                )}
+              </div>
             </div>
+            {(patient.status === 'Sudah Pulang' || Boolean(dischargeInfo)) && (
+              <div className="flex justify-between items-center py-2 border-b border-slate-50 gap-2 bg-amber-50/50 -mx-2 px-2 rounded-xl">
+                <span className="text-amber-900 font-bold">Waktu Pulang (Alumni)</span>
+                <div className="text-right">
+                  <span className="font-black text-amber-950 block text-xs sm:text-sm">
+                    {dischargeInfo ? dischargeInfo.fullDate : formatIndonesianDate(patient.dischargeDate || '')}
+                  </span>
+                  {dischargeInfo && (
+                    <span className="text-[11px] font-extrabold text-amber-800 block">
+                      Pukul {dischargeInfo.timeStr}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

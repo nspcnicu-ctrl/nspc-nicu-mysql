@@ -18,7 +18,9 @@ import {
   Upload,
   Image as ImageIcon,
   Sparkles,
+  Clock,
 } from 'lucide-react';
+import { isMilestoneChecked } from '../utils/milestones';
 
 interface EditPatientModalProps {
   isOpen: boolean;
@@ -45,6 +47,14 @@ export const EditPatientModal: React.FC<EditPatientModalProps> = ({
   const [babyName, setBabyName] = useState(patient.babyName || '');
   const [gender, setGender] = useState<Gender>(patient.gender || 'Laki-Laki');
   const [birthDate, setBirthDate] = useState(patient.birthDate || '');
+  const [admissionDate, setAdmissionDate] = useState(patient.admissionDate || '');
+  const [admissionTime, setAdmissionTime] = useState(patient.admissionTime || '');
+  const [readyToDischargeDate, setReadyToDischargeDate] = useState(
+    patient.readyToDischargeDate || new Date().toISOString().split('T')[0]
+  );
+  const [readyToDischargeTime, setReadyToDischargeTime] = useState(
+    patient.readyToDischargeTime || '10:00'
+  );
   const [gestationalAgeWeeks, setGestationalAgeWeeks] = useState<number>(patient.gestationalAgeWeeks || 36);
   const [initialWeight, setInitialWeight] = useState<number>(patient.initialAnthropometry?.weightGram || 2500);
   const [initialLength, setInitialLength] = useState<number>(patient.initialAnthropometry?.lengthCm || 46);
@@ -71,6 +81,10 @@ export const EditPatientModal: React.FC<EditPatientModalProps> = ({
       setBabyName(patient.babyName || '');
       setGender(patient.gender || 'Laki-Laki');
       setBirthDate(patient.birthDate || '');
+      setAdmissionDate(patient.admissionDate || '');
+      setAdmissionTime(patient.admissionTime || '');
+      setReadyToDischargeDate(patient.readyToDischargeDate || new Date().toISOString().split('T')[0]);
+      setReadyToDischargeTime(patient.readyToDischargeTime || '10:00');
       setGestationalAgeWeeks(patient.gestationalAgeWeeks || 36);
       setInitialWeight(patient.initialAnthropometry?.weightGram || 2500);
       setInitialLength(patient.initialAnthropometry?.lengthCm || 46);
@@ -134,6 +148,10 @@ export const EditPatientModal: React.FC<EditPatientModalProps> = ({
       babyName: babyName.trim(),
       gender,
       birthDate,
+      admissionDate: admissionDate || patient.admissionDate,
+      admissionTime: admissionTime.trim() || undefined,
+      readyToDischargeDate: readyToDischargeDate || undefined,
+      readyToDischargeTime: readyToDischargeTime.trim() || undefined,
       gestationalAgeWeeks: Number(gestationalAgeWeeks) || 36,
       gestationCategory: Number(gestationalAgeWeeks) >= 37 ? 'aterm' : 'preterm',
       initialAnthropometry: {
@@ -371,6 +389,38 @@ export const EditPatientModal: React.FC<EditPatientModalProps> = ({
                 </div>
               </div>
 
+              {/* Tanggal Masuk NICU */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Tanggal Masuk NICU
+                </label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={admissionDate}
+                    onChange={(e) => setAdmissionDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-semibold focus:bg-white focus:border-teal-600 outline-none transition-all"
+                  />
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Waktu Pasien Masuk */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Waktu Pasien Masuk (Jam:Menit)
+                </label>
+                <div className="relative">
+                  <input
+                    type="time"
+                    value={admissionTime}
+                    onChange={(e) => setAdmissionTime(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-semibold focus:bg-white focus:border-teal-600 outline-none transition-all"
+                  />
+                  <Clock className="w-4 h-4 text-teal-700 absolute left-3 top-3 pointer-events-none" />
+                </div>
+              </div>
+
               {/* Gestational Age */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -519,6 +569,60 @@ export const EditPatientModal: React.FC<EditPatientModalProps> = ({
                   <Home className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                 </div>
               </div>
+
+              {/* FITUR KHUSUS: WAKTU PASIEN SIAP PULANG (DAPAT DI-CUSTOM) */}
+              {(patient.status === 'Siap Pulang' || isMilestoneChecked(patient.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) && (
+                <div className="sm:col-span-2 p-4 bg-emerald-50/90 border border-emerald-300 rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-emerald-600 text-white rounded-xl shadow-xs shrink-0">
+                      <Sparkles className="w-4 h-4 text-amber-200" />
+                    </div>
+                    <div>
+                      <h5 className="font-extrabold text-xs text-emerald-950 flex items-center gap-1.5">
+                        <span>Status Pasien: Siap Pulang</span>
+                        <span className="px-2 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full text-[10px] font-black">
+                          ✓ Boleh Pulang
+                        </span>
+                      </h5>
+                      <p className="text-[11px] text-emerald-800">
+                        Tampilkan dan sesuaikan waktu pasien yang sudah siap pulang (custom jadwal kepulangan):
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-950 mb-1">
+                        Tanggal Siap Pulang
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="date"
+                          value={readyToDischargeDate}
+                          onChange={(e) => setReadyToDischargeDate(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs text-slate-900 font-bold focus:border-emerald-600 outline-none transition-all shadow-2xs"
+                        />
+                        <Calendar className="w-4 h-4 text-emerald-700 absolute left-3 top-2.5 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-950 mb-1">
+                        Waktu Siap Pulang (Jam:Menit Custom)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="time"
+                          value={readyToDischargeTime}
+                          onChange={(e) => setReadyToDischargeTime(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs text-slate-900 font-bold focus:border-emerald-600 outline-none transition-all shadow-2xs"
+                        />
+                        <Clock className="w-4 h-4 text-emerald-700 absolute left-3 top-2.5 pointer-events-none" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

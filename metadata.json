@@ -1,6 +1,6 @@
 {
-  "name": "NSPC RSUD Undata",
-  "description": "Aplikasi Kartu Perkembangan Bayi dan Dashboard Nakes NICU RSUD Undata",
+  "name": "Remix Remix nspc-nicu-mysql",
+  "description": "Imported from GitHub: nspcnicu-ctrl/nspc-nicu-mysql",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

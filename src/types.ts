@@ -1,6 +1,6 @@
 export type GestationCategory = 'aterm' | 'preterm';
 
-export type Gender = 'Laki-Laki' | 'Perempuan';
+export type Gender = 'Laki-Laki' | 'Laki-laki' | 'Perempuan';
 
 export type MedicalEquipment = 
   | 'Infus'
@@ -9,7 +9,8 @@ export type MedicalEquipment =
   | 'Ventilator'
   | 'Monitor TTV'
   | 'Nasal Kanul'
-  | 'O2 Mask';
+  | 'O2 Mask'
+  | (string & {});
 
 export interface EquipmentItem {
   id: string;
@@ -90,6 +91,7 @@ export interface DailyLog {
 
 export interface DischargeSummary {
   dischargeDate: string;
+  dischargeTime?: string;
   dischargeWeightGram: number;
   dischargeNotes: string;
   doctorInCharge: string;
@@ -137,6 +139,11 @@ export interface Patient {
   birthDate: string;
   birthTime?: string;
   admissionDate: string;
+  admissionTime?: string; // Waktu pasien masuk (e.g. "08:30" atau format waktu jam:menit)
+  readyToDischargeDate?: string; // Tanggal pasien siap pulang (YYYY-MM-DD)
+  readyToDischargeTime?: string; // Waktu pasien siap pulang yang dapat di-custom (e.g. "10:30" atau custom)
+  dischargeDate?: string;
+  dischargeTime?: string;
   gestationalAgeWeeks: number;
   gestationCategory: GestationCategory;
   initialAnthropometry: Anthropometry;

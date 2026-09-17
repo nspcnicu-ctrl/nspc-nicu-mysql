@@ -1,22 +1,266 @@
 import mysql from 'mysql2/promise';
+import dns from 'node:dns';
+import { spawn } from 'node:child_process';
 import { Patient, DailyLog, NakesUser, EducationPdfItem } from '../types';
 import { INITIAL_PATIENTS } from '../data/initialPatients';
 import { INITIAL_NAKES_USERS } from '../data/initialNakes';
+import { DEFAULT_EDUCATION_PDFS } from '../data/defaultEducation';
+
+// Prioritize IPv4 DNS lookup to prevent IPv6 timeouts when connecting to hosting servers
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {}
+
+const REMOTE_API_BASE = 'https://chagrin.id/api';
+
+export function fetchViaCurl(url: string, postData?: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const args = ['-4', '-s', '--max-time', '15', url];
+    if (postData) {
+      args.push('-H', 'Content-Type: application/json', '-d', JSON.stringify(postData));
+    }
+    const child = spawn('curl', args);
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`curl exited with code ${code}`));
+      try {
+        const str = Buffer.concat(chunks).toString('utf8');
+        resolve(JSON.parse(str));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
 
 let pool: mysql.Pool | null = null;
 let isConnected = false;
 let connectionError: string | null = null;
 
-// In-memory fallback storage in case MySQL is not reachable or not yet configured
+// Helper serialization functions
+function parseJsonSafe(val: any, fallback: any = null) {
+  if (!val) return fallback;
+  if (typeof val === 'object') return val;
+  try {
+    return JSON.parse(val);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function formatDateForMySql(d?: string | Date | null): string | null {
+  if (!d) return null;
+  const str = String(d);
+  if (str.length === 10 && str.includes('-')) return str;
+  try {
+    const dt = new Date(str);
+    if (isNaN(dt.getTime())) return null;
+    return dt.toISOString().split('T')[0];
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatDateTimeForMySql(d?: string | Date | null): string | null {
+  if (!d) return null;
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return null;
+    return dt.toISOString().slice(0, 19).replace('T', ' ');
+  } catch (e) {
+    return null;
+  }
+}
+
+function parseRowToPatient(row: any): Patient {
+  const isAterm = (row.gestation_category || row.gestationCategory) === 'aterm';
+  const rawLogs = (
+    row.progress_logs ||
+    row.progressLogs ||
+    row.daily_logs ||
+    row.dailyLogs ||
+    []
+  );
+
+  const logs: DailyLog[] = (Array.isArray(rawLogs) ? rawLogs : []).map((l: any, idx: number) => ({
+    id: String(l.id || `log_${idx}_${Date.now()}`),
+    date: l.date || l.log_date || l.logDate || new Date().toISOString().split('T')[0],
+    periodLabel: l.periodLabel || l.period_label || l.period || (isAterm ? `Hari ke-${idx + 1}` : `Minggu ke-${idx + 1}`),
+    weightGram: Number(l.weightGram || l.weight_gram || l.weight || 0),
+    weightChangeGram: Number(l.weightChangeGram || l.weight_change_gram || l.weightDiff || 0),
+    vitalSigns: parseJsonSafe(l.vitalSigns || l.vital_signs, {
+      temperature: 36.8,
+      heartRate: 140,
+      respiratoryRate: 44,
+      spo2: 98,
+    }),
+    drinkingAbility: parseJsonSafe(l.drinkingAbility || l.drinking_ability, {
+      method: 'OGT/Sonde',
+      volumeCcPerFeeding: 10,
+      frequencyPerDay: 8,
+    }),
+    activeEquipment: parseJsonSafe(l.activeEquipment || l.active_equipment, []),
+    milestonesList: parseJsonSafe(l.milestonesList || l.milestones_list, []),
+    nakesNotes: l.nakesNotes || l.nakes_notes || '',
+    updatedBy: l.updatedBy || l.updated_by || 'Nakes NICU',
+    createdAt: l.createdAt || l.created_at || new Date().toISOString(),
+    photoUrl: l.photoUrl || l.photo_url || undefined,
+    photoCaption: l.photoCaption || l.photo_caption || undefined,
+  }));
+
+  const isDel = Boolean(
+    row.is_deleted === 1 ||
+    row.is_deleted === '1' ||
+    row.is_deleted === true ||
+    row.is_deleted === 'true' ||
+    row.isDeleted === 1 ||
+    row.isDeleted === '1' ||
+    row.isDeleted === true ||
+    row.isDeleted === 'true' ||
+    row.status === 'deleted' ||
+    row.status === 'Deleted' ||
+    row.status === 'Disembunyikan'
+  );
+
+  let cleanMilestones: string[] = [];
+  const rawMilestones = row.milestones;
+  const parsedM = typeof rawMilestones === 'string' ? parseJsonSafe(rawMilestones, []) : rawMilestones;
+  if (Array.isArray(parsedM)) {
+    cleanMilestones = parsedM.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+  } else if (parsedM && typeof parsedM === 'object') {
+    cleanMilestones = Object.entries(parsedM).filter(([_, v]) => Boolean(v)).map(([k]) => k);
+  }
+
+  return {
+    id: String(row.id || `p_${Date.now()}`),
+    nickname: row.nickname || '',
+    accessPassword: row.access_password || row.accessPassword || row.password || '123456',
+    babyName: row.baby_name || row.babyName || row.name || 'Bayi Ny.',
+    fatherName: row.father_name || row.fatherName || '',
+    motherName: row.mother_name || row.motherName || '',
+    parentPhone: row.parent_phone || row.parentPhone || '',
+    gender: row.gender || 'Laki-Laki',
+    birthDate: formatDateForMySql(row.birth_date || row.birthDate) || new Date().toISOString().split('T')[0],
+    birthTime: row.birth_time || row.birthTime || undefined,
+    admissionDate: formatDateForMySql(row.admission_date || row.admissionDate) || new Date().toISOString().split('T')[0],
+    admissionTime: row.admission_time || row.admissionTime || undefined,
+    readyToDischargeDate: row.ready_to_discharge_date || row.readyToDischargeDate || undefined,
+    readyToDischargeTime: row.ready_to_discharge_time || row.readyToDischargeTime || undefined,
+    dischargeDate: row.discharge_date || row.dischargeDate || undefined,
+    dischargeTime: row.discharge_time || row.dischargeTime || undefined,
+    gestationalAgeWeeks: Number(row.gestational_age_weeks || row.gestationalAgeWeeks || 36),
+    gestationCategory: row.gestation_category || row.gestationCategory || 'preterm',
+    status: row.status && row.status !== 'deleted' ? row.status : (isDel ? 'deleted' : 'Rawat NICU'),
+    medicalRecordNumber: row.medical_record_number || row.medicalRecordNumber || '',
+    roomNumber: row.room_number || row.roomNumber || '',
+    coverPhotoUrl: row.cover_photo_url || row.coverPhotoUrl || undefined,
+    initialAnthropometry: parseJsonSafe(row.initial_anthropometry || row.initialAnthropometry, {
+      weightGram: 2000,
+      lengthCm: 45,
+      headCircumferenceCm: 32,
+      chestCircumferenceCm: 30,
+    }),
+    currentEquipment: parseJsonSafe(row.current_equipment || row.currentEquipment, []),
+    registeredEquipment: parseJsonSafe(row.registered_equipment || row.registeredEquipment, []),
+    milestones: cleanMilestones,
+    immunizationDischarge: parseJsonSafe(row.immunization_discharge || row.immunizationDischarge, undefined),
+    dischargeSummary: parseJsonSafe(row.discharge_summary || row.dischargeSummary, undefined),
+    dischargedAt: row.discharged_at || row.dischargedAt || undefined,
+    dailyLogs: logs,
+    progressLogs: logs,
+    progress_logs: logs,
+    daily_logs: logs,
+    isDeleted: isDel,
+    deletedAt: row.deleted_at || row.deletedAt || undefined,
+    isActive: row.is_active !== undefined ? Boolean(row.is_active) : true,
+  };
+}
+
+function parseRowToNakes(row: any): NakesUser {
+  return {
+    id: String(row.id),
+    name: row.name || 'Petugas Nakes',
+    roleTitle: row.role_title || row.roleTitle || 'Anggota',
+    accountType: row.account_type || row.accountType || 'Anggota Biasa',
+    username: row.username || '',
+    pin: row.pin || '1234',
+    hasAccessRights: Boolean(row.has_access_rights ?? row.hasAccessRights),
+    isSuperAdmin: Boolean(row.is_super_admin ?? row.isSuperAdmin),
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    lastLoginAt: row.last_login_at || row.lastLoginAt || undefined,
+  };
+}
+
+function parseRowToPdf(row: any): EducationPdfItem {
+  return {
+    id: String(row.id),
+    title: row.title || 'Materi Edukasi NICU',
+    category: row.category || 'EDUKASI',
+    fileName: row.fileName || row.file_name || 'edukasi.pdf',
+    fileSizeText: row.fileSizeText || row.file_size_text || '1.2 MB',
+    fileDataUrl: row.fileDataUrl || row.file_data_url || undefined,
+    coverImageUrl: row.coverImageUrl || row.cover_image_url || undefined,
+    pageCount: Number(row.pageCount || row.page_count || 1),
+    nakesNote: row.nakesNote || row.nakes_note || undefined,
+    publishedAt: row.publishedAt || row.published_at || new Date().toISOString().split('T')[0],
+    isActive: row.isActive !== undefined ? Boolean(row.isActive) : (row.is_active !== undefined ? Boolean(row.is_active) : true),
+  };
+}
+
+// In-memory storage seeded directly with the real MySQL patient database
 let memoryPatients: Patient[] = [...INITIAL_PATIENTS];
 let memoryNakesUsers: NakesUser[] = [...INITIAL_NAKES_USERS];
 let memoryLoginLogs: any[] = [];
-let memoryEducationPdfs: EducationPdfItem[] = [];
+let memoryEducationPdfs: EducationPdfItem[] = [...DEFAULT_EDUCATION_PDFS];
+
+/**
+ * Fetch and sync all latest patients, nakes, and education records from the MySQL database API
+ */
+export async function syncFromRemoteDbApi(): Promise<boolean> {
+  try {
+    const pData = await fetchViaCurl(`${REMOTE_API_BASE}/patients.php?include_deleted=1`);
+    if (pData && Array.isArray(pData.data) && pData.data.length > 0) {
+      const mapped = pData.data.map(parseRowToPatient);
+      if (mapped.length > 0) {
+        memoryPatients = mapped;
+        console.log(`[MySQL DB] Successfully synced ${mapped.length} real patients from database.`);
+      }
+    }
+
+    const nData = await fetchViaCurl(`${REMOTE_API_BASE}/nakes_users.php`);
+    if (nData && Array.isArray(nData.data) && nData.data.length > 0) {
+      const mappedNakes = nData.data.map(parseRowToNakes);
+      if (mappedNakes.length > 0) {
+        memoryNakesUsers = mappedNakes;
+        console.log(`[MySQL DB] Successfully synced ${mappedNakes.length} nakes users from database.`);
+      }
+    }
+
+    const eData = await fetchViaCurl(`${REMOTE_API_BASE}/education_pdfs.php`);
+    if (eData && Array.isArray(eData.data) && eData.data.length > 0) {
+      const mappedPdfs = eData.data.map(parseRowToPdf);
+      if (mappedPdfs.length > 0) {
+        memoryEducationPdfs = mappedPdfs;
+        console.log(`[MySQL DB] Successfully synced ${mappedPdfs.length} education PDFs from database.`);
+      }
+    }
+
+    return true;
+  } catch (err: any) {
+    console.warn('[MySQL DB] Sync from remote database API note:', err.message);
+    return false;
+  }
+}
 
 /**
  * Initialize MySQL Connection Pool
  */
 export async function initDbPool(): Promise<boolean> {
+  // Start background sync from live database API immediately so data is always fresh
+  syncFromRemoteDbApi().catch((e) => console.warn('[MySQL DB] Initial live sync note:', e.message));
+
   const host = process.env.MYSQL_HOST;
   const user = process.env.MYSQL_USER;
   const database = process.env.MYSQL_DATABASE;
@@ -24,9 +268,9 @@ export async function initDbPool(): Promise<boolean> {
   const port = parseInt(process.env.MYSQL_PORT || '3306', 10);
 
   if (!host || !user || !database) {
-    console.warn('[MySQL DB] MySQL environment variables (MYSQL_HOST, MYSQL_USER, MYSQL_DATABASE) not fully specified. Running in resilient in-memory storage mode.');
+    console.warn('[MySQL DB] MySQL environment variables not fully specified. Running with live database API sync.');
     isConnected = false;
-    connectionError = 'MySQL environment variables not provided. Using in-memory fallback.';
+    connectionError = 'Running with live database API sync.';
     return false;
   }
 
@@ -229,42 +473,11 @@ export function getDbStatus() {
 // PATIENTS OPERATIONS (CRUD WITH PREPARED STATEMENTS)
 // =============================================================================
 
-function parseJsonSafe(val: any, fallback: any = null) {
-  if (!val) return fallback;
-  if (typeof val === 'object') return val;
-  try {
-    return JSON.parse(val);
-  } catch (e) {
-    return fallback;
-  }
-}
-
-function formatDateForMySql(d?: string | Date | null): string | null {
-  if (!d) return null;
-  const str = String(d);
-  if (str.length === 10 && str.includes('-')) return str;
-  try {
-    const dt = new Date(str);
-    if (isNaN(dt.getTime())) return null;
-    return dt.toISOString().split('T')[0];
-  } catch (e) {
-    return null;
-  }
-}
-
-function formatDateTimeForMySql(d?: string | Date | null): string | null {
-  if (!d) return null;
-  try {
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return null;
-    return dt.toISOString().slice(0, 19).replace('T', ' ');
-  } catch (e) {
-    return null;
-  }
-}
-
 export async function getAllPatients(options?: { includeDeleted?: boolean; onlyDeleted?: boolean }): Promise<Patient[]> {
   if (!isConnected || !pool) {
+    if (memoryPatients.length === 0) {
+      await syncFromRemoteDbApi();
+    }
     if (options?.onlyDeleted) {
       return memoryPatients.filter((p) => p.isDeleted || p.status === 'deleted' || p.status === 'Disembunyikan');
     }
@@ -335,7 +548,13 @@ export async function getAllPatients(options?: { includeDeleted?: boolean; onlyD
         motherName: row.mother_name || '',
         gender: row.gender || 'Laki-Laki',
         birthDate: formatDateForMySql(row.birth_date) || String(row.birth_date),
+        birthTime: row.birth_time || undefined,
         admissionDate: formatDateForMySql(row.admission_date) || String(row.admission_date),
+        admissionTime: row.admission_time || parseJsonSafe(row.initial_anthropometry, {})?.admissionTime || undefined,
+        readyToDischargeDate: row.ready_to_discharge_date || parseJsonSafe(row.discharge_summary, {})?.readyToDischargeDate || undefined,
+        readyToDischargeTime: row.ready_to_discharge_time || parseJsonSafe(row.discharge_summary, {})?.readyToDischargeTime || undefined,
+        dischargeDate: row.discharge_date || parseJsonSafe(row.discharge_summary, {})?.dischargeDate || undefined,
+        dischargeTime: row.discharge_time || parseJsonSafe(row.discharge_summary, {})?.dischargeTime || undefined,
         gestationalAgeWeeks: Number(row.gestational_age_weeks) || 36,
         gestationCategory: row.gestation_category || 'preterm',
         status: row.status || 'Rawat NICU',
@@ -383,6 +602,87 @@ export async function upsertPatient(patient: Patient): Promise<Patient> {
     memoryPatients[existingIdx] = { ...patient };
   } else {
     memoryPatients.unshift({ ...patient });
+  }
+
+  // Always forward to Live Remote MySQL API (https://chagrin.id/api/patients.php)
+  try {
+    const payload = {
+      action: 'save',
+      id: patient.id,
+      nickname: patient.nickname || '',
+      access_password: patient.accessPassword || '123456',
+      password: patient.accessPassword || '123456',
+      baby_name: patient.babyName || 'Bayi',
+      babyName: patient.babyName || 'Bayi',
+      name: patient.babyName || 'Bayi',
+      father_name: patient.fatherName || '',
+      fatherName: patient.fatherName || '',
+      mother_name: patient.motherName || '',
+      motherName: patient.motherName || '',
+      parent_name: patient.parentName || (patient.fatherName ? `${patient.fatherName} ${patient.motherName || ''}`.trim() : patient.motherName || ''),
+      parentName: patient.parentName || (patient.fatherName ? `${patient.fatherName} ${patient.motherName || ''}`.trim() : patient.motherName || ''),
+      parent_phone: patient.parentPhone || '',
+      parentPhone: patient.parentPhone || '',
+      gender: patient.gender || 'Laki-Laki',
+      birth_date: formatDateForMySql(patient.birthDate) || new Date().toISOString().split('T')[0],
+      birthDate: formatDateForMySql(patient.birthDate) || new Date().toISOString().split('T')[0],
+      birth_time: patient.birthTime || '',
+      birthTime: patient.birthTime || '',
+      admission_date: formatDateForMySql(patient.admissionDate) || new Date().toISOString().split('T')[0],
+      admissionDate: formatDateForMySql(patient.admissionDate) || new Date().toISOString().split('T')[0],
+      admission_time: patient.admissionTime || '',
+      admissionTime: patient.admissionTime || '',
+      ready_to_discharge_date: patient.readyToDischargeDate || null,
+      readyToDischargeDate: patient.readyToDischargeDate || null,
+      ready_to_discharge_time: patient.readyToDischargeTime || '',
+      readyToDischargeTime: patient.readyToDischargeTime || '',
+      discharge_date: patient.dischargeDate || null,
+      dischargeDate: patient.dischargeDate || null,
+      discharge_time: patient.dischargeTime || '',
+      dischargeTime: patient.dischargeTime || '',
+      gestational_age_weeks: patient.gestationalAgeWeeks || 36,
+      gestationalAgeWeeks: patient.gestationalAgeWeeks || 36,
+      gestation_category: patient.gestationCategory || 'preterm',
+      gestationCategory: patient.gestationCategory || 'preterm',
+      status: patient.status || 'Rawat NICU',
+      medical_record_number: patient.medicalRecordNumber || '',
+      medicalRecordNumber: patient.medicalRecordNumber || '',
+      room_number: patient.roomNumber || '',
+      roomNumber: patient.roomNumber || '',
+      cover_photo_url: patient.coverPhotoUrl || null,
+      coverPhotoUrl: patient.coverPhotoUrl || null,
+      initial_anthropometry: patient.initialAnthropometry || null,
+      initialAnthropometry: patient.initialAnthropometry || null,
+      current_equipment: patient.currentEquipment || [],
+      currentEquipment: patient.currentEquipment || [],
+      registered_equipment: patient.registeredEquipment || [],
+      registeredEquipment: patient.registeredEquipment || [],
+      milestones: patient.milestones || [],
+      immunization_discharge: patient.immunizationDischarge || null,
+      immunizationDischarge: patient.immunizationDischarge || null,
+      discharge_summary: patient.dischargeSummary || null,
+      dischargeSummary: patient.dischargeSummary || null,
+      discharged_at: patient.dischargedAt || null,
+      dischargedAt: patient.dischargedAt || null,
+      daily_logs: patient.dailyLogs || [],
+      dailyLogs: patient.dailyLogs || [],
+      progress_logs: patient.dailyLogs || [],
+      progressLogs: patient.dailyLogs || [],
+      is_deleted: patient.isDeleted ? 1 : 0,
+      deleted_at: patient.deletedAt || null,
+    };
+
+    fetch(`${REMOTE_API_BASE}/patients.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    })
+      .then((r) => r.json())
+      .then((d) => console.log('[Remote Sync] upsertPatient response from live MySQL:', d))
+      .catch((err) => console.warn('[Remote Sync] upsertPatient note:', err.message));
+  } catch (err: any) {
+    console.warn('[Remote Sync] upsertPatient payload error:', err.message);
   }
 
   if (!isConnected || !pool) {
@@ -445,7 +745,10 @@ export async function upsertPatient(patient: Patient): Promise<Patient> {
       patient.medicalRecordNumber || '',
       patient.roomNumber || '',
       patient.coverPhotoUrl || null,
-      JSON.stringify(patient.initialAnthropometry || {}),
+      JSON.stringify({
+        ...(patient.initialAnthropometry || {}),
+        admissionTime: patient.admissionTime || (patient.initialAnthropometry as any)?.admissionTime || undefined,
+      }),
       JSON.stringify(patient.currentEquipment || []),
       JSON.stringify(patient.registeredEquipment || []),
       JSON.stringify(
@@ -456,7 +759,13 @@ export async function upsertPatient(patient: Patient): Promise<Patient> {
           : []
       ),
       patient.immunizationDischarge ? JSON.stringify(patient.immunizationDischarge) : null,
-      patient.dischargeSummary ? JSON.stringify(patient.dischargeSummary) : null,
+      JSON.stringify({
+        ...(patient.dischargeSummary || {}),
+        readyToDischargeDate: patient.readyToDischargeDate || (patient.dischargeSummary as any)?.readyToDischargeDate || undefined,
+        readyToDischargeTime: patient.readyToDischargeTime || (patient.dischargeSummary as any)?.readyToDischargeTime || undefined,
+        dischargeDate: patient.dischargeDate || undefined,
+        dischargeTime: patient.dischargeTime || undefined,
+      }),
       formatDateTimeForMySql(patient.dischargedAt),
       patient.isDeleted ? 1 : 0,
       formatDateTimeForMySql(patient.deletedAt),
@@ -545,6 +854,35 @@ export async function deletePatientById(patientId: string, hardDelete = false, m
     }
   }
 
+  // Always forward delete to live remote API (https://chagrin.id/api)
+  try {
+    const delUrl = `${REMOTE_API_BASE}/delete_patient.php?id=${encodeURIComponent(patientId)}&action=${hardDelete ? 'permanent_delete' : 'soft_delete'}`;
+    fetch(delUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: patientId,
+        action: hardDelete ? 'permanent_delete' : 'soft_delete',
+        medical_record_number: medicalRecordNumber,
+      }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+
+    fetch(`${REMOTE_API_BASE}/patients.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: patientId,
+        action: hardDelete ? 'permanent_delete' : 'soft_delete',
+        is_deleted: hardDelete ? 2 : 1,
+        status: hardDelete ? 'deleted' : 'deleted',
+      }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+  } catch (err: any) {
+    console.warn('[Remote Sync] deletePatientById note:', err.message);
+  }
+
   if (!isConnected || !pool) return true;
 
   try {
@@ -586,6 +924,21 @@ export async function restorePatientById(patientId: string): Promise<boolean> {
     memoryPatients[idx].status = 'Rawat NICU';
   }
 
+  // Always forward restore to live remote API (https://chagrin.id/api)
+  try {
+    fetch(`${REMOTE_API_BASE}/patients.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'restore',
+        id: patientId,
+      }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+  } catch (err: any) {
+    console.warn('[Remote Sync] restorePatientById note:', err.message);
+  }
+
   if (!isConnected || !pool) return true;
 
   try {
@@ -615,6 +968,21 @@ export async function addOrUpdateDailyLog(patientId: string, log: DailyLog): Pro
     } else {
       patient.dailyLogs = [...(patient.dailyLogs || []), log];
     }
+  }
+
+  // Always forward daily log to live remote API (https://chagrin.id/api)
+  try {
+    fetch(`${REMOTE_API_BASE}/daily_logs.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patient_id: patientId,
+        ...log,
+      }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+  } catch (err: any) {
+    console.warn('[Remote Sync] addOrUpdateDailyLog note:', err.message);
   }
 
   if (!isConnected || !pool) return log;
@@ -673,6 +1041,18 @@ export async function deleteDailyLogById(patientId: string, logId: string): Prom
     );
   }
 
+  // Always forward daily log deletion to live remote API (https://chagrin.id/api)
+  try {
+    fetch(`${REMOTE_API_BASE}/daily_logs.php?id=${encodeURIComponent(logId)}&patient_id=${encodeURIComponent(patientId)}&action=delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: logId, patient_id: patientId, action: 'delete' }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+  } catch (err: any) {
+    console.warn('[Remote Sync] deleteDailyLogById note:', err.message);
+  }
+
   if (!isConnected || !pool) return true;
 
   try {
@@ -692,7 +1072,12 @@ export async function deleteDailyLogById(patientId: string, logId: string): Prom
 // =============================================================================
 
 export async function getAllNakesUsers(): Promise<NakesUser[]> {
-  if (!isConnected || !pool) return [...memoryNakesUsers];
+  if (!isConnected || !pool) {
+    if (memoryNakesUsers.length === 0) {
+      await syncFromRemoteDbApi();
+    }
+    return [...memoryNakesUsers];
+  }
 
   try {
     const [rows] = await pool.query<any[]>(`
@@ -848,7 +1233,12 @@ export async function getNakesLoginLogs(limit = 50): Promise<any[]> {
 // =============================================================================
 
 export async function getAllEducationPdfs(): Promise<EducationPdfItem[]> {
-  if (!isConnected || !pool) return [...memoryEducationPdfs];
+  if (!isConnected || !pool) {
+    if (memoryEducationPdfs.length === 0) {
+      await syncFromRemoteDbApi();
+    }
+    return [...memoryEducationPdfs];
+  }
 
   try {
     const [rows] = await pool.query<any[]>(`

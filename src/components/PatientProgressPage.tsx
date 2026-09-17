@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Patient, MedicalEquipment, Milestones, NakesUser, DailyLog, EquipmentItem, EducationPdfItem, ImmunizationDischargeRecord } from '../types';
-import { formatDetailedDuration, formatDateTimeWithTime, formatIndonesianDate } from '../utils/dateUtils';
+import { formatDetailedDuration, formatDateTimeWithTime, formatIndonesianDate, getPatientAdmissionDateTime, getPatientDischargeDateTime } from '../utils/dateUtils';
 import { savePdfDataUrl, getPdfDataUrlSync, getPdfDataUrl, triggerPdfDownload, dataUrlToBlob } from '../services/pdfStore';
 import { saveGlobalPdf, deleteStoredGlobalPdf, resolvePatientEducationPdfs } from '../services/storage';
 import { renderPdfFirstPageToImage, generateFallbackPdfCover, generateSamplePdfDataUrl } from '../services/pdfRender';
 import { PdfViewerCanvas } from './PdfViewerCanvas';
 import { EducationPdfCard } from './EducationPdfCard';
 import { EducationLightboxModal } from './EducationLightboxModal';
+import { CustomTimeModal, CustomTimeTab } from './CustomTimeModal';
 import { downloadEducationPdf } from '../utils/pdfDownload';
 import {
   normalizeMilestones,
@@ -121,6 +122,7 @@ import {
   Droplets,
   GraduationCap,
   Info,
+  Pencil,
   Save,
   TrendingUp,
   Share2,
@@ -250,6 +252,8 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
   const lastLog = progressLogs[0];
   const logCount = progressLogs.length + 1;
   const isAterm = patient.gestationCategory === 'aterm';
+  const admissionInfo = getPatientAdmissionDateTime(patient);
+  const dischargeInfo = getPatientDischargeDateTime(patient);
 
   const [logDate, setLogDate] = useState(new Date().toISOString().split('T')[0]);
   const [periodLabel, setPeriodLabel] = useState(isAterm ? `Hari ke-${logCount}` : `Minggu ke-${logCount}`);
@@ -319,6 +323,10 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
       setRegisteredEquipment(patient.registeredEquipment);
     }
   }, [patient]);
+
+  // CUSTOM WAKTU MASUK & PULANG STATES
+  const [isCustomTimeModalOpen, setIsCustomTimeModalOpen] = useState(false);
+  const [customTimeModalTab, setCustomTimeModalTab] = useState<CustomTimeTab>('discharge');
 
   const handleEqPresetChange = (presetName: string) => {
     setSelectedEqPreset(presetName);
@@ -659,6 +667,12 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
       ...patient,
       milestones: updatedMilestones,
       status: newStatus,
+      readyToDischargeDate: isBolehPulang
+        ? (patient.readyToDischargeDate || new Date().toISOString().split('T')[0])
+        : patient.readyToDischargeDate,
+      readyToDischargeTime: isBolehPulang
+        ? (patient.readyToDischargeTime || '10:00')
+        : patient.readyToDischargeTime,
     };
 
     onUpdatePatient(updatedPatient);
@@ -833,6 +847,12 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
       currentEquipment: [...logEquipment],
       milestones: [...logMilestones],
       status: newStatus,
+      readyToDischargeDate: isBolehPulang
+        ? (patient.readyToDischargeDate || new Date().toISOString().split('T')[0])
+        : patient.readyToDischargeDate,
+      readyToDischargeTime: isBolehPulang
+        ? (patient.readyToDischargeTime || '10:00')
+        : patient.readyToDischargeTime,
       coverPhotoUrl: logPhotoUrl || patient.coverPhotoUrl,
     };
 
@@ -1030,15 +1050,29 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
             <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl shrink-0 mt-0.5">
               <Calendar className="w-5 h-5" />
             </div>
-            <div className="space-y-1 min-w-0">
+            <div className="space-y-1 min-w-0 flex-1">
               <div className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">
                 Lama Perawatan NICU
               </div>
               <div className="text-sm sm:text-base font-black text-white leading-tight truncate">
                 {stayDuration.displayString}
               </div>
-              <div className="text-[11px] text-slate-400 font-medium">
-                Masuk: {formatDateTimeWithTime(patient.admissionDate)}
+              {/* Waktu Masuk - BISA DIKLIK & DICUSTOM */}
+              <div
+                onClick={() => {
+                  setCustomTimeModalTab('admission');
+                  setIsCustomTimeModalOpen(true);
+                }}
+                className="mt-1 px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-[11px] text-slate-200 hover:text-white font-medium flex items-center justify-between gap-1.5 cursor-pointer transition-all border border-white/10 hover:border-white/30 group/adm"
+                title="Klik untuk Sesuaikan / Custom Waktu Masuk"
+              >
+                <span className="truncate">
+                  Masuk: {admissionInfo ? admissionInfo.fullDisplay : formatDateTimeWithTime(patient.admissionDate)}
+                </span>
+                <span className="shrink-0 flex items-center gap-1 text-[10px] text-teal-300 group-hover/adm:underline font-bold">
+                  <span>Edit Waktu</span>
+                  <Pencil className="w-2.5 h-2.5" />
+                </span>
               </div>
             </div>
           </div>
@@ -1061,6 +1095,88 @@ export const PatientProgressPage: React.FC<PatientProgressPageProps> = ({
             </div>
           </div>
         </div>
+
+        {/* BANNER WAKTU SIAP PULANG (DAPAT DI-CUSTOM) */}
+        {(patient.status === 'Siap Pulang' || isMilestoneChecked(patient.milestones, 'SIAP & BOLEH PULANG', 'bolehPulang')) && patient.status !== 'Sudah Pulang' && (
+          <div
+            onClick={() => {
+              setCustomTimeModalTab('discharge');
+              setIsCustomTimeModalOpen(true);
+            }}
+            className="p-4 sm:p-5 bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 rounded-2xl text-white border border-emerald-500/50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 animate-fadeIn cursor-pointer hover:border-emerald-400 transition-all group"
+            title="Klik untuk Sesuaikan / Custom Waktu Pulang"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="p-2.5 bg-emerald-500 text-white rounded-xl shadow-xs shrink-0 group-hover:scale-105 transition-transform">
+                <Sparkles className="w-5 h-5 text-amber-200" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                    Status Pasien: Siap Pulang
+                  </span>
+                  <span className="px-2 py-0.5 bg-emerald-500/30 text-emerald-200 rounded-full text-[10px] font-extrabold border border-emerald-400/30">
+                    ✓ Medis Memenuhi Syarat
+                  </span>
+                </div>
+                <div className="text-sm sm:text-base font-extrabold text-white mt-0.5">
+                  Waktu Siap Pulang:{' '}
+                  <span className="text-amber-300 underline font-black">
+                    {patient.readyToDischargeDate ? formatDateTimeWithTime(patient.readyToDischargeDate) : formatDateTimeWithTime(new Date().toISOString().split('T')[0])}{' '}
+                    {patient.readyToDischargeTime ? `• Pukul ${patient.readyToDischargeTime} WITA` : '• Pukul 10:00 WITA'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-200/80 mt-0.5">
+                  Waktu kepulangan ini dapat disesuaikan (custom) dan tampil secara sinkron di portal monitoring orang tua.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCustomTimeModalTab('discharge');
+                setIsCustomTimeModalOpen(true);
+              }}
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
+            >
+              <Clock className="w-4 h-4" />
+              <span>Sesuaikan / Custom Waktu</span>
+            </button>
+          </div>
+        )}
+
+        {/* BANNER ALUMNI SUDAH PULANG */}
+        {patient.status === 'Sudah Pulang' && (
+          <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-xs text-amber-950 shadow-2xs">
+            <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0">
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-sm text-amber-950">Alumni NICU RSUD Undata (Sudah Pulang)</span>
+                <span className="px-1.5 py-0.5 bg-amber-200 text-amber-950 rounded-full text-[9px] font-black">LULUS</span>
+              </div>
+              <p className="text-[11px] text-amber-800 mt-0.5 font-medium">
+                Telah menyelesaikan seluruh masa perawatan NICU dan lulus medis secara sehat.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL CUSTOM WAKTU (MASUK MAUPUN PULANG) */}
+        <CustomTimeModal
+          isOpen={isCustomTimeModalOpen}
+          onClose={() => setIsCustomTimeModalOpen(false)}
+          patient={patient}
+          initialTab={customTimeModalTab}
+          onSave={async (updated, msg) => {
+            onUpdatePatient(updated);
+            setSuccessBanner(msg);
+            setTimeout(() => setSuccessBanner(null), 4500);
+          }}
+        />
 
         {/* 3. HORIZONTAL NAVIGATION TABS */}
         <div className="bg-white rounded-2xl p-1.5 border border-slate-200/80 shadow-2xs flex items-center gap-1 overflow-x-auto scrollbar-none">
@@ -2699,6 +2815,9 @@ export const DischargeModal: React.FC<DischargeModalProps> = ({
   const [dischargeDate, setDischargeDate] = useState<string>(
     patient.dischargeDate || new Date().toISOString().split('T')[0]
   );
+  const [dischargeTime, setDischargeTime] = useState<string>(
+    patient.dischargeTime || new Date().toTimeString().slice(0, 5)
+  );
   const [doctorDpjp, setDoctorDpjp] = useState<string>(
     patient.dpjpDoctor || 'DPJP: Hasni Hilipito. S. Kep,. Ns'
   );
@@ -2715,6 +2834,7 @@ export const DischargeModal: React.FC<DischargeModalProps> = ({
       ...patient,
       status: 'Sudah Pulang',
       dischargeDate,
+      dischargeTime,
       dpjpDoctor: doctorDpjp,
       immunizationDischarge: {
         ...(patient.immunizationDischarge || {
@@ -2800,6 +2920,41 @@ export const DischargeModal: React.FC<DischargeModalProps> = ({
             <p className="leading-relaxed text-slate-700 text-[11px]">
               Status pasien akan diubah menjadi <strong className="text-slate-900">SUDAH PULANG (Alumni NICU)</strong>. Data rekam medis pasien ini akan tersimpan <strong className="text-emerald-800 font-bold">permanen di Data Alumni</strong>.
             </p>
+          </div>
+
+          {/* Tanggal & Waktu Pasien Keluar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Tanggal Pasien Keluar
+              </label>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={dischargeDate}
+                  onChange={(e) => setDischargeDate(e.target.value)}
+                  required
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:bg-white focus:border-teal-500 outline-none"
+                />
+                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Waktu Pasien Keluar (Jam:Menit)
+              </label>
+              <div className="relative">
+                <input
+                  type="time"
+                  value={dischargeTime}
+                  onChange={(e) => setDischargeTime(e.target.value)}
+                  required
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:bg-white focus:border-teal-500 outline-none"
+                />
+                <Clock className="w-4 h-4 text-teal-600 absolute left-3 top-2.5 pointer-events-none" />
+              </div>
+            </div>
           </div>
 
           {/* DPJP Input */}

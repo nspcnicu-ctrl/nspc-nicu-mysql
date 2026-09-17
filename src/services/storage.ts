@@ -43,14 +43,14 @@ function getInitialGlobalPdfs(): EducationPdfItem[] {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const valid = parsed.filter((p) => p && p.id && p.title);
-          return valid;
+          if (valid.length > 0) return valid;
         }
       }
     }
   } catch (e) {
     // Ignore error
   }
-  return [];
+  return [...DEFAULT_EDUCATION_PDFS];
 }
 
 let MEMORY_GLOBAL_PDFS: EducationPdfItem[] = getInitialGlobalPdfs();
@@ -356,19 +356,21 @@ export function getStoredPatients(): Patient[] {
     const data = localStorage.getItem(STORAGE_KEY);
     if (data !== null) {
       const list: Patient[] = JSON.parse(data);
-      if (Array.isArray(list)) {
+      if (Array.isArray(list) && list.length > 0) {
         const validList = list
           .filter((p) => p && p.id && (p.babyName || p.nickname) && isNotPermanentlyDeleted(p))
           .map(normalizePatient);
-        MEMORY_PATIENTS = validList;
-        return [...validList];
+        if (validList.length > 0) {
+          MEMORY_PATIENTS = validList;
+          return [...validList];
+        }
       }
     }
   } catch (err) {
     console.error('Error loading patients from storage:', err);
   }
 
-  // Fallback to initial patients if empty
+  // Fallback to real MySQL database patients if empty in storage
   if (INITIAL_PATIENTS && INITIAL_PATIENTS.length > 0) {
     const filtered = INITIAL_PATIENTS.filter(isNotPermanentlyDeleted);
     MEMORY_PATIENTS = [...filtered];
@@ -456,7 +458,7 @@ export async function syncFromBackend(): Promise<Patient[]> {
   try {
     // Include soft-deleted patients so Trash tab and Active tabs both remain accurately in sync with MySQL
     const remotePatients = await fetchPatientsApi(true);
-    if (remotePatients && Array.isArray(remotePatients)) {
+    if (remotePatients && Array.isArray(remotePatients) && remotePatients.length > 0) {
       // Filter out any corrupted, blank, or permanently deleted entries
       const validRemote = remotePatients.filter(
         (p) => {
@@ -470,10 +472,12 @@ export async function syncFromBackend(): Promise<Patient[]> {
           return true;
         }
       );
-      MEMORY_PATIENTS = validRemote;
-      safeSaveToLocalStorage(STORAGE_KEY, validRemote);
-      window.dispatchEvent(new Event('nspc_data_changed'));
-      return validRemote;
+      if (validRemote.length > 0) {
+        MEMORY_PATIENTS = validRemote;
+        safeSaveToLocalStorage(STORAGE_KEY, validRemote);
+        window.dispatchEvent(new Event('nspc_data_changed'));
+        return validRemote;
+      }
     }
   } catch (err) {
     console.warn('[Storage] Sync from backend warning (using cache):', err);
@@ -760,16 +764,28 @@ export function deletePatient(patientId: string): void {
   softDeletePatient(patientId);
 }
 
-export function markPatientDischarged(patientId: string, notes?: string, doctor?: string): Patient | undefined {
+export function markPatientDischarged(
+  patientId: string,
+  notes?: string,
+  doctor?: string,
+  customDate?: string,
+  customTime?: string
+): Patient | undefined {
   const patients = getStoredPatients();
   const patient = patients.find((p) => p.id === patientId);
   if (!patient) return undefined;
 
-  const nowIso = new Date().toISOString();
+  const dateToUse = customDate || patient.dischargeDate || patient.readyToDischargeDate || new Date().toISOString().split('T')[0];
+  const timeToUse = customTime || patient.dischargeTime || patient.readyToDischargeTime || new Date().toTimeString().slice(0, 5);
+  const sqlDischargedAt = `${dateToUse} ${timeToUse}:00`;
   const latestWeight = patient.dailyLogs[0]?.weightGram || patient.initialAnthropometry.weightGram;
 
   patient.status = 'Sudah Pulang';
-  patient.dischargedAt = nowIso;
+  patient.dischargedAt = sqlDischargedAt;
+  patient.dischargeDate = dateToUse;
+  patient.dischargeTime = timeToUse;
+  patient.readyToDischargeDate = dateToUse;
+  patient.readyToDischargeTime = timeToUse;
   
   const currentMilestones = Array.isArray(patient.milestones)
     ? [...patient.milestones]
@@ -783,7 +799,8 @@ export function markPatientDischarged(patientId: string, notes?: string, doctor?
   patient.milestones = currentMilestones;
 
   patient.dischargeSummary = {
-    dischargeDate: nowIso.split('T')[0],
+    dischargeDate: dateToUse,
+    dischargeTime: timeToUse,
     dischargeWeightGram: latestWeight,
     dischargeNotes: notes || 'Selamat! Si kecil telah memenuhi syarat medis dan dinyatakan LULUS dari NICU RSUD Undata.',
     doctorInCharge: doctor || 'Tim Dokter Penanggung Jawab Pasien (DPJP) NICU',
@@ -927,15 +944,15 @@ export function findNakesUserByCredentials(usernameInput: string, pinInput: stri
   const cleanUser = usernameInput.trim().toLowerCase();
   const cleanPin = pinInput.trim();
 
-  if (cleanUser) {
-    const match = users.find(
-      (u) => u.username.toLowerCase() === cleanUser && u.pin === cleanPin
-    );
-    if (match) return match;
+  // Both username and PIN are strictly required for security
+  if (!cleanUser || !cleanPin) {
+    return undefined;
   }
 
-  const pinMatch = users.find((u) => u.pin === cleanPin);
-  if (pinMatch) return pinMatch;
+  const match = users.find(
+    (u) => (u.username?.toLowerCase() === cleanUser || u.id?.toLowerCase() === cleanUser) && u.pin === cleanPin
+  );
+  if (match) return match;
 
   return undefined;
 }

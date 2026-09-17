@@ -3,6 +3,8 @@ import { Patient } from '../types';
 import {
   formatLengthOfStay,
   formatIndonesianDate,
+  getPatientAdmissionDateTime,
+  getPatientDischargeDateTime,
 } from '../utils/dateUtils';
 import {
   Award,
@@ -46,6 +48,9 @@ export const SouvenirCardModal: React.FC<SouvenirCardModalProps> = ({
   const handlePrint = () => {
     window.print();
   };
+
+  const admissionInfo = getPatientAdmissionDateTime(patient);
+  const dischargeInfo = getPatientDischargeDateTime(patient);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 md:p-6 bg-slate-900/70 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:static print:overflow-visible print-only-container">
@@ -158,9 +163,15 @@ export const SouvenirCardModal: React.FC<SouvenirCardModalProps> = ({
                     <span className="font-bold text-slate-800">{formatIndonesianDate(patient.birthDate)}</span>
                   </div>
                   <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 print:p-1.5">
-                    <span className="text-slate-400 text-[10px] print:text-[8px] block">Tgl Masuk NICU</span>
-                    <span className="font-bold text-slate-800">{formatIndonesianDate(patient.admissionDate)}</span>
+                    <span className="text-slate-400 text-[10px] print:text-[8px] block">Waktu Masuk NICU</span>
+                    <span className="font-bold text-slate-800">{admissionInfo ? admissionInfo.fullDisplay : formatIndonesianDate(patient.admissionDate)}</span>
                   </div>
+                  {dischargeInfo && (
+                    <div className="bg-amber-50/80 p-2.5 rounded-xl border border-amber-200/80 print:p-1.5 col-span-2">
+                      <span className="text-amber-800 text-[10px] print:text-[8px] block font-extrabold">Waktu Pulang (Lulus Medis NICU)</span>
+                      <span className="font-black text-amber-950">{dischargeInfo.fullDisplay}</span>
+                    </div>
+                  )}
                   <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 print:p-1.5">
                     <span className="text-slate-400 text-[10px] print:text-[8px] block">Usia Gestasi</span>
                     <span className="font-bold text-slate-800">{patient.gestationalAgeWeeks} Minggu ({patient.gestationCategory === 'aterm' ? 'Aterm' : 'Preterm'})</span>

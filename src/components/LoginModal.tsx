@@ -136,15 +136,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleNakesLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setNakesError('');
-    const cleanPin = adminPin.trim();
     const cleanUser = nakesUsername.trim();
+    const cleanPin = adminPin.trim();
 
+    if (!cleanUser && !cleanPin) {
+      setNakesError('Username dan PIN Akses wajib diisi.');
+      return;
+    }
+    if (!cleanUser) {
+      setNakesError('Username / NIP Nakes wajib diisi.');
+      return;
+    }
     if (!cleanPin) {
-      setNakesError('Masukkan PIN Akses Nakes Anda.');
+      setNakesError('PIN Akses Nakes wajib diisi.');
       return;
     }
 
-    // Check against registered Nakes accounts
+    // Check against registered Nakes accounts (strictly requires both username & pin)
     let match = findNakesUserByCredentials(cleanUser, cleanPin);
     if (match) {
       onSuccessNakesLogin(match);
@@ -152,15 +160,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // Check master admin pin
+    // Check master admin credentials (strictly requires username 'admin' or 'superadmin')
+    const cleanUserLower = cleanUser.toLowerCase();
     const validMasterPin = getAdminPin();
-    if (cleanPin === validMasterPin || cleanPin === 'adminnicu' || cleanPin === 'admin') {
+    const isMasterUser = cleanUserLower === 'admin' || cleanUserLower === 'superadmin';
+    const isMasterPin = cleanPin === validMasterPin || cleanPin === 'adminnicu';
+
+    if (isMasterUser && isMasterPin) {
       const fallbackMaster: NakesUser = {
-        id: 'master_admin',
-        name: 'Admin Utama NICU',
-        roleTitle: 'Petugas Administrator NICU',
-        username: 'admin',
+        id: 'nakes_superadmin',
+        name: 'Super Admin NICU',
+        roleTitle: 'Super Administrator',
+        username: cleanUserLower,
         pin: cleanPin,
+        hasAccessRights: true,
+        isSuperAdmin: true,
+        accountType: 'Super Admin',
         createdAt: new Date().toISOString(),
       };
       onSuccessNakesLogin(fallbackMaster);
@@ -172,9 +187,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setIsVerifying(true);
     try {
       const remoteUsers = await syncNakesFromBackend(true);
-      const cleanUserLower = cleanUser.toLowerCase();
       const remoteMatch = remoteUsers.find(
-        (u) => (cleanUserLower ? u.username.toLowerCase() === cleanUserLower : true) && u.pin === cleanPin
+        (u) =>
+          (u.username?.toLowerCase() === cleanUserLower || u.id?.toLowerCase() === cleanUserLower) &&
+          u.pin === cleanPin
       );
       if (remoteMatch) {
         onSuccessNakesLogin(remoteMatch);
@@ -187,7 +203,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
     setIsVerifying(false);
 
-    setNakesError('PIN atau Username Nakes tidak valid. Silakan periksa kembali atau daftar akun baru.');
+    setNakesError('Username atau PIN Akses Nakes tidak valid. Pastikan keduanya terisi dengan benar.');
   };
 
   const handleNakesRegisterSubmit = (e: React.FormEvent) => {
@@ -302,13 +318,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Nickname Pasien
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Nickname Pasien</span>
+                  <span className="text-[10px] text-rose-500 font-bold">*Wajib</span>
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                   <input
                     type="text"
+                    required
                     value={nickname}
                     onChange={(e) => setNickname(e.target.value)}
                     placeholder="Contoh: bayi_fitriani"
@@ -318,13 +336,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Password Akses
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Password Akses</span>
+                  <span className="text-[10px] text-rose-500 font-bold">*Wajib</span>
                 </label>
                 <div className="relative">
                   <Key className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type={showParentPassword ? "text" : "password"}
+                    required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Password dari Petugas"
@@ -416,13 +436,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Username / NIP Nakes (Opsional)
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>Username / NIP Nakes</span>
+                    <span className="text-[10px] text-rose-500 font-bold">*Wajib</span>
                   </label>
                   <div className="relative">
                     <User className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                     <input
                       type="text"
+                      required
                       value={nakesUsername}
                       onChange={(e) => setNakesUsername(e.target.value)}
                       placeholder="Masukkan Username / NIP"
@@ -432,13 +454,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    PIN Akses Nakes (Wajib)
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>PIN Akses Nakes</span>
+                    <span className="text-[10px] text-rose-500 font-bold">*Wajib</span>
                   </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                       type={showNakesPin ? "text" : "password"}
+                      required
                       value={adminPin}
                       onChange={(e) => setAdminPinInput(e.target.value)}
                       placeholder="Masukkan PIN Akses Nakes Anda"

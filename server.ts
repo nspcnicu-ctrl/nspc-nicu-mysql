@@ -97,14 +97,14 @@ async function startServer() {
   // ---------------------------------------------------------------------------
   // 2. REAL-TIME SERVER-SENT EVENTS (SSE) ENDPOINT
   // ---------------------------------------------------------------------------
-  app.get('/api/events', (req: Request, res: Response) => {
+  app.get(['/api/events', '/api/stream_updates.php'], (req: Request, res: Response) => {
     addSseClient(res);
   });
 
   // ---------------------------------------------------------------------------
   // 3. PATIENTS CRUD API (Supports /api/patients & /api/patients.php)
   // ---------------------------------------------------------------------------
-  app.get(['/api/patients', '/api/patients.php'], async (req: Request, res: Response) => {
+  app.get(['/api/patients', '/api/patients.php', '/api/get_patients.php'], async (req: Request, res: Response) => {
     try {
       const includeDeleted =
         req.query.include_deleted === '1' ||
@@ -130,7 +130,7 @@ async function startServer() {
     }
   });
 
-  app.post(['/api/patients', '/api/patients.php'], async (req: Request, res: Response) => {
+  app.post(['/api/patients', '/api/patients.php', '/api/register_patient.php', '/api/update_patient.php'], async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const action = String(body.action || '').toLowerCase();
@@ -631,6 +631,78 @@ async function startServer() {
     }
   });
 
+  // Unified Login Endpoint (/api/login & /api/login.php)
+  app.post(['/api/login', '/api/login.php'], async (req: Request, res: Response) => {
+    try {
+      const input = req.body || {};
+      const role = String(input.role || input.user_type || '').toLowerCase();
+      const username = String(input.username || input.nickname || '').trim();
+      const password = String(input.password || input.pin || '').trim();
+
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '') as string;
+      const userAgent = (req.headers['user-agent'] || '') as string;
+
+      // 1. Check if Nakes Login
+      if (role === 'nakes' || (input.username && input.pin) || (!input.nickname && username && password)) {
+        const allNakes = await getAllNakesUsers();
+        const searchUser = String(input.username || username).trim().toLowerCase();
+        const pinInput = String(input.pin || password).trim();
+
+        const match = allNakes.find(
+          (u) => u.username.trim().toLowerCase() === searchUser && u.pin.trim() === pinInput
+        );
+
+        if (match) {
+          await recordNakesLoginLog(match, String(ip), userAgent);
+          broadcastRealtimeEvent('nakes_logged_in', { userId: match.id, name: match.name });
+          return res.json({
+            status: 'success',
+            success: true,
+            message: 'Login Tenaga Kesehatan berhasil!',
+            data: {
+              user_type: 'nakes',
+              user: match,
+              token: Buffer.from(JSON.stringify({ id: match.id, time: Date.now() })).toString('base64'),
+            },
+          });
+        }
+      }
+
+      // 2. Check if Parent Login
+      const nickInput = String(input.nickname || username).trim().toLowerCase();
+      const passInput = String(input.password || password).trim();
+
+      if (nickInput && passInput) {
+        const allPatients = await getAllPatients({ includeDeleted: false });
+        const match = allPatients.find(
+          (p) => p.nickname.trim().toLowerCase() === nickInput && p.accessPassword.trim() === passInput
+        );
+
+        if (match) {
+          return res.json({
+            status: 'success',
+            success: true,
+            message: `Selamat datang orang tua dari ${match.babyName}!`,
+            data: {
+              user_type: 'parent',
+              patient: match,
+              token: Buffer.from(JSON.stringify({ patient_id: match.id, time: Date.now() })).toString('base64'),
+            },
+          });
+        }
+      }
+
+      return res.status(401).json({
+        status: 'error',
+        success: false,
+        message: 'Nama Panggilan/Username atau Password/PIN salah. Silakan periksa kembali.',
+        data: null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', success: false, error: err.message });
+    }
+  });
+
   app.get('/api/nakes/login-logs', async (req: Request, res: Response) => {
     try {
       const logs = await getNakesLoginLogs(50);
@@ -643,7 +715,7 @@ async function startServer() {
   // ---------------------------------------------------------------------------
   // 6. EDUCATION PDFS API
   // ---------------------------------------------------------------------------
-  app.get(['/api/education-pdfs', '/api/education_pdfs.php'], async (req: Request, res: Response) => {
+  app.get(['/api/education-pdfs', '/api/education_pdfs.php', '/api/get_education.php'], async (req: Request, res: Response) => {
     try {
       const pdfs = await getAllEducationPdfs();
       res.json({ success: true, status: 'success', data: pdfs, items: pdfs });
@@ -757,7 +829,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/daily_logs.php', async (req: Request, res: Response) => {
+  app.get(['/api/daily_logs.php', '/api/get_patient_logs.php'], async (req: Request, res: Response) => {
     try {
       const patientId = (req.query.patient_id || req.query.id) as string;
       const patients = await getAllPatients();
@@ -773,7 +845,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/daily_logs.php', async (req: Request, res: Response) => {
+  app.post(['/api/daily_logs.php', '/api/add_daily_log.php'], async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const action = String(body.action || 'save').toLowerCase();
